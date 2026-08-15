@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>择校通 · 页面搬家了</title>
+<meta name="theme-color" content="#c2410c" />
+<meta name="description" content="择校通 · AI 帮你查学校、找工作、搞钱。" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23c2410c%22%2F%3E%3Ctext%20x%3D%2232%22%20y%3D%2246%22%20font-size%3D%2240%22%20text-anchor%3D%22middle%22%20fill%3D%22%23ffffff%22%20font-family%3D%22serif%22%20font-weight%3D%22700%22%3E%E6%8B%A9%3C%2Ftext%3E%3C%2Fsvg%3E" />
+<script>
+/**
+ * GitHub Pages user-site 404 fallback：
+ * 任意子路径（如 /ai-search?tab=school、/ai-tutor）落到这里，
+ * 立刻重定向到实际项目子路径 /zexiaotong/<原路径>，保留 query / hash。
+ * 根 / 由同仓库 index.html（引导页）处理，本文件不动。
+ */
+(function () {
+  try {
+    var here = location.pathname + (location.search || '') + (location.hash || '');
+    if (!here || here === '/' || here === '') return; // 根让位给 index.html
+    location.replace('https://lwl555.github.io/zexiaotong' + here);
+  } catch (_) { /* 若 replace 失败，下方手动链接兜底 */ }
+})();
+</script>
+</head>
+<body style="font:14px/1.6 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f1d1b;background:#faf7f2;margin:0;padding:48px;max-width:560px;">
+  <p style="color:#c2410c;font-weight:600;letter-spacing:.02em;margin:0 0 8px;">页面搬家了</p>
+  <p style="margin:0 0 16px;">择校通的子路径已迁移到 <code style="font-family:ui-monospace,Menlo,Consolas,monospace;">/zexiaotong/</code> 下，正在自动前往…</p>
+  <p style="margin:0;"><a id="manual" href="https://lwl555.github.io/zexiaotong/" style="color:#c2410c;">手动前往择校通 →</a></p>
+  <script>
+    // JS 启用但 redirect 未触发时的手动链接兜底（带上原路径）
+    var m = document.getElementById('manual');
+    if (m) m.href = 'https://lwl555.github.io/zexiaotong' + location.pathname + location.search + location.hash;
+  </script>
+  <noscript><meta http-equiv="refresh" content="0;url=https://lwl555.github.io/zexiaotong/" /></noscript>
+</body>
+</html>
