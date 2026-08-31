@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>超有用的工具箱 - 66个免费在线小工具</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f8fafc; min-height: 100vh; }
+        .hero { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 60%, #7c3aed 100%); color: white; padding: 34px 20px 58px; text-align: center; position: relative; }
+        .hero h1 { font-size: 26px; font-weight: 800; margin-bottom: 8px; letter-spacing: 1px; }
+        .hero p { font-size: 13px; opacity: .85; }
+        .search-wrap { position: sticky; top: 0; z-index: 10; padding: 0 16px; margin-top: -26px; }
+        .search-box { background: white; border-radius: 14px; box-shadow: 0 6px 16px rgba(79,70,229,.18); padding: 6px 14px; display: flex; align-items: center; gap: 10px; }
+        .search-box span { font-size: 18px; }
+        .search-box input { flex: 1; border: none; outline: none; font-size: 15px; padding: 10px 0; font-family: inherit; background: transparent; }
+        .cats { display: flex; gap: 8px; overflow-x: auto; padding: 16px 16px 4px; scrollbar-width: none; -ms-overflow-style: none; }
+        .cats::-webkit-scrollbar { display: none; }
+        .cat { flex-shrink: 0; padding: 8px 16px; border-radius: 999px; background: white; color: #475569; font-size: 13px; cursor: pointer; border: 1.5px solid #e2e8f0; user-select: none; font-weight: 500; }
+        .cat.on { background: #4f46e5; color: white; border-color: #4f46e5; font-weight: 700; }
+        .tools { max-width: 640px; margin: 0 auto; padding: 12px 16px 30px; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+        .tool { background: white; border-radius: 16px; padding: 16px 14px; box-shadow: 0 2px 8px rgba(0,0,0,.05); cursor: pointer; transition: all .2s; text-decoration: none; color: inherit; position: relative; display: block; }
+        .tool:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(79,70,229,.15); }
+        .tool .ico { font-size: 26px; margin-bottom: 8px; }
+        .tool .tt { font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 4px; }
+        .tool .dd { font-size: 12px; color: #64748b; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .tool .star { position: absolute; right: 10px; top: 12px; font-size: 14px; color: #e2e8f0; }
+        .tool .star.on { color: #f59e0b; }
+        .empty { grid-column: 1/-1; text-align: center; color: #94a3b8; padding: 40px 0; font-size: 14px; }
+        .count { max-width: 640px; margin: 0 auto; padding: 4px 20px; font-size: 12px; color: #94a3b8; }
+        .footer { text-align: center; padding: 24px 20px 40px; color: #94a3b8; font-size: 12px; line-height: 2; }
+        .rand-btn { position: fixed; right: 18px; bottom: 26px; width: 52px; height: 52px; border-radius: 50%; background: #4f46e5; color: white; border: none; font-size: 22px; cursor: pointer; box-shadow: 0 6px 18px rgba(79,70,229,.4); z-index: 9; }
+        .rand-btn:active { transform: scale(.92); }
+    </style>
+</head>
+<body>
+    <div class="hero">
+        <h1>🧰 超有用的工具箱</h1>
+        <p>66 个免费在线小工具 · 无广告 · 数据不离开手机</p>
+    </div>
+    <div class="search-wrap">
+        <div class="search-box">
+            <span>🔍</span>
+            <input id="q" type="search" placeholder="搜索工具，如：二维码 / PDF / 个税">
+        </div>
+    </div>
+    <div class="cats" id="cats"></div>
+    <div class="count" id="count"></div>
+    <div class="tools" id="grid"></div>
+    <div class="footer">
+        微信公众号「超有用的林」· 每天一个超实用小工具<br>
+        全部工具纯前端运行，文件不上传服务器
+    </div>
+    <button class="rand-btn" id="rand" title="随机来一个">🎲</button>
+    <script>
+        var tools = [{"id":"grid-cutter","title":"九宫格切图","desc":"一键将图片切成九宫格，发朋友圈超好看！","icon":"✂️","category":"image","tags":["图片","朋友圈"],"url":"grid-cutter.html"},{"id":"photo-bg","title":"证件照换底色","desc":"在线更换证件照背景色，支持白底蓝底红底。","icon":"📷","category":"image","tags":["证件照","办公"],"url":"photo-bg.html"},{"id":"image-compress","title":"图片压缩","desc":"智能压缩图片大小，保持画质清晰。","icon":"📦","category":"image","tags":["压缩","图片"],"url":"image-compress.html"},{"id":"image-convert","title":"图片格式转换","desc":"支持JPG、PNG、WebP等格式互转。","icon":"🔄","category":"image","tags":["格式转换"],"url":"image-convert.html"},{"id":"image-crop","title":"图片裁剪","desc":"自由裁剪图片尺寸，实时预览。","icon":"🖼️","category":"image","tags":["裁剪"],"url":"image-crop.html"},{"id":"image-rotate","title":"图片旋转","desc":"任意角度旋转图片，支持翻转。","icon":"🔃","category":"image","tags":["旋转"],"url":"image-rotate.html"},{"id":"image-watermark","title":"图片加水印","desc":"为图片添加文字或图片水印。","icon":"💧","category":"image","tags":["水印","版权"],"url":"image-watermark.html"},{"id":"image-merge","title":"图片拼接","desc":"多张图片拼接成一张。","icon":"🧩","category":"image","tags":["拼接"],"url":"image-merge.html"},{"id":"word-count","title":"字数统计","desc":"实时统计中英文字符数、单词数。","icon":"📝","category":"text","tags":["字数","写作"],"url":"word-count.html"},{"id":"text-to-image","title":"文字转图片","desc":"将文字转换为精美图片。","icon":"🖼️","category":"text","tags":["文字","社交"],"url":"text-to-image.html"},{"id":"markdown-editor","title":"Markdown编辑器","desc":"实时预览的Markdown编辑器。","icon":"📄","category":"text","tags":["Markdown"],"url":"markdown-editor.html"},{"id":"json-formatter","title":"JSON格式化","desc":"JSON代码格式化、压缩、校验。","icon":"🔧","category":"text","tags":["JSON","开发"],"url":"json-formatter.html"},{"id":"text-dedup","title":"文本去重","desc":"快速去除重复行。","icon":"🧹","category":"text","tags":["去重","清理"],"url":"text-dedup.html"},{"id":"text-sort","title":"文本排序","desc":"按多种规则对文本行排序。","icon":"📊","category":"text","tags":["排序"],"url":"text-sort.html"},{"id":"text-encrypt","title":"文字加密","desc":"支持Base64、凯撒、XOR加密解密。","icon":"🔐","category":"text","tags":["加密","安全"],"url":"text-encrypt.html"},{"id":"regex-test","title":"正则表达式测试","desc":"实时测试正则表达式。","icon":"🔍","category":"dev","tags":["正则","开发"],"url":"regex-test.html"},{"id":"base64","title":"Base64编解码","desc":"Base64编码和解码工具。","icon":"🔐","category":"dev","tags":["Base64"],"url":"base64.html"},{"id":"url-encode","title":"URL编解码","desc":"URL编码和解码工具。","icon":"🔗","category":"dev","tags":["URL"],"url":"url-encode.html"},{"id":"color-convert","title":"颜色代码转换","desc":"HEX、RGB、HSL颜色代码互转。","icon":"🎨","category":"dev","tags":["颜色","设计"],"url":"color-convert.html"},{"id":"number-convert","title":"进制转换","desc":"二进制、八进制、十进制、十六进制互转。","icon":"🔢","category":"dev","tags":["进制"],"url":"number-convert.html"},{"id":"html-preview","title":"HTML预览","desc":"实时预览HTML代码效果。","icon":"🌐","category":"dev","tags":["HTML"],"url":"html-preview.html"},{"id":"css-formatter","title":"CSS格式化","desc":"CSS代码格式化、压缩、美化。","icon":"✨","category":"dev","tags":["CSS"],"url":"css-formatter.html"},{"id":"mortgage-calc","title":"房贷计算器","desc":"等额本息、等额本金两种还款方式。","icon":"🏠","category":"calc","tags":["房贷","生活"],"url":"mortgage-calc.html"},{"id":"car-loan-calc","title":"车贷计算器","desc":"计算车贷月供、总利息。","icon":"🚗","category":"calc","tags":["车贷"],"url":"car-loan-calc.html"},{"id":"bmi-calc","title":"BMI计算器","desc":"计算身体质量指数。","icon":"⚖️","category":"calc","tags":["BMI","健康"],"url":"bmi-calc.html"},{"id":"age-calc","title":"年龄计算器","desc":"精确计算年龄、天数。","icon":"🎂","category":"calc","tags":["年龄","生日"],"url":"age-calc.html"},{"id":"date-calc","title":"日期计算器","desc":"计算两个日期之间的天数。","icon":"📅","category":"calc","tags":["日期"],"url":"date-calc.html"},{"id":"tax-calc","title":"个税计算器","desc":"计算个人所得税（含五险一金）。","icon":"💰","category":"calc","tags":["个税","工资"],"url":"tax-calc.html"},{"id":"unit-convert","title":"单位换算","desc":"长度、重量、面积等单位换算。","icon":"📏","category":"calc","tags":["单位","生活"],"url":"unit-convert.html"},{"id":"percentage-calc","title":"百分比计算器","desc":"计算百分比、折扣、增长率。","icon":"💯","category":"calc","tags":["百分比"],"url":"percentage-calc.html"},{"id":"qrcode","title":"二维码生成器","desc":"生成自定义二维码，可下载。","icon":"📱","category":"generator","tags":["二维码","办公"],"url":"qrcode.html"},{"id":"barcode","title":"条形码生成器","desc":"生成CODE128、EAN13等格式条形码。","icon":"📊","category":"generator","tags":["条形码"],"url":"barcode.html"},{"id":"password-gen","title":"密码生成器","desc":"生成安全随机密码。","icon":"🔑","category":"generator","tags":["密码","安全"],"url":"password-gen.html"},{"id":"uuid-gen","title":"UUID生成器","desc":"生成UUID/GUID。","icon":"🆔","category":"generator","tags":["UUID","开发"],"url":"uuid-gen.html"},{"id":"random-num","title":"随机数生成器","desc":"生成指定范围随机数。","icon":"🎲","category":"generator","tags":["随机数"],"url":"random-num.html"},{"id":"lorem-gen","title":"假文生成器","desc":"生成随机占位文本（中文/英文）。","icon":"📝","category":"generator","tags":["假文","设计"],"url":"lorem-gen.html"},{"id":"gradient-gen","title":"渐变色生成器","desc":"可视化创建CSS渐变色。","icon":"🌈","category":"generator","tags":["渐变色","CSS"],"url":"gradient-gen.html"},{"id":"shadow-gen","title":"阴影生成器","desc":"可视化创建CSS阴影效果。","icon":"🔲","category":"generator","tags":["阴影","CSS"],"url":"shadow-gen.html"},{"id":"color-palette","title":"配色方案生成器","desc":"一键生成专业配色方案。","icon":"🎨","category":"design","tags":["配色","色彩"],"url":"color-palette.html"},{"id":"color-picker","title":"取色器","desc":"从图片取色，点击即复制。","icon":"🖌️","category":"design","tags":["取色","颜色"],"url":"color-picker.html"},{"id":"border-radius","title":"圆角生成器","desc":"可视化调整CSS圆角。","icon":"⬜","category":"design","tags":["圆角","CSS"],"url":"border-radius.html"},{"id":"font-preview","title":"字体预览","desc":"预览不同字体效果。","icon":"🔤","category":"design","tags":["字体"],"url":"font-preview.html"},{"id":"image-filter","title":"图片滤镜","desc":"为图片添加各种滤镜效果。","icon":"📸","category":"design","tags":["滤镜","图片"],"url":"image-filter.html"},{"id":"pomodoro","title":"番茄钟计时器","desc":"25分钟专注+5分钟休息。","icon":"🍅","category":"life","tags":["番茄钟","效率"],"url":"pomodoro.html"},{"id":"countdown","title":"倒计时器","desc":"设置倒计时，到时提醒。","icon":"⏰","category":"life","tags":["倒计时","提醒"],"url":"countdown.html"},{"id":"stopwatch","title":"秒表","desc":"精确计时，支持分圈记录。","icon":"⏱️","category":"life","tags":["秒表","运动"],"url":"stopwatch.html"},{"id":"world-clock","title":"世界时钟","desc":"查看全球各地时间。","icon":"🌍","category":"life","tags":["时钟","旅行"],"url":"world-clock.html"},{"id":"random-picker","title":"随机选择器","desc":"帮你做决定！","icon":"🎯","category":"life","tags":["随机","趣味"],"url":"random-picker.html"},{"id":"coin-flip","title":"抛硬币","desc":"虚拟抛硬币，带统计。","icon":"🪙","category":"life","tags":["抛硬币","趣味"],"url":"coin-flip.html"},{"id":"dice-roll","title":"掷骰子","desc":"虚拟掷骰子，支持多颗。","icon":"🎲","category":"life","tags":["骰子","游戏"],"url":"dice-roll.html"},{"id":"pdf-merge","title":"PDF合并","desc":"多个PDF文件合并为一个。","icon":"📄","category":"office","tags":["PDF","办公"],"url":"pdf-merge.html"},{"id":"pdf-split","title":"PDF拆分","desc":"将PDF拆分、提取指定页。","icon":"✂️","category":"office","tags":["PDF"],"url":"pdf-split.html"},{"id":"pdf-compress","title":"PDF压缩","desc":"优化PDF文件结构，减小体积。","icon":"📦","category":"office","tags":["PDF","压缩"],"url":"pdf-compress.html"},{"id":"file-rename","title":"批量重命名","desc":"批量修改文件名，打包下载。","icon":"📁","category":"office","tags":["重命名"],"url":"file-rename.html"},{"id":"excel-convert","title":"Excel转换","desc":"Excel与CSV、JSON格式互转。","icon":"📊","category":"office","tags":["Excel"],"url":"excel-convert.html"},{"id":"text-to-speech","title":"文字转语音","desc":"将文字转换为语音朗读。","icon":"🔊","category":"office","tags":["语音"],"url":"text-to-speech.html"},{"id":"mind-map","title":"思维导图","desc":"在线编辑思维导图，导出大纲。","icon":"🧠","category":"learn","tags":["思维导图","学习"],"url":"mind-map.html"},{"id":"flow-chart","title":"流程图","desc":"简单拖拽绘制流程图。","icon":"📐","category":"learn","tags":["流程图"],"url":"flow-chart.html"},{"id":"flash-card","title":"记忆卡片","desc":"制作闪卡，辅助记忆。","icon":"🃏","category":"learn","tags":["记忆","学习"],"url":"flash-card.html"},{"id":"study-timer","title":"学习计时器","desc":"记录学习时长统计。","icon":"📚","category":"learn","tags":["计时","学习"],"url":"study-timer.html"},{"id":"emoji-maker","title":"表情包生成器","desc":"自定义表情包文字。","icon":"😂","category":"fun","tags":["表情包","社交"],"url":"emoji-maker.html"},{"id":"avatar-gen","title":"头像生成器","desc":"生成个性化文字头像。","icon":"👤","category":"fun","tags":["头像","社交"],"url":"avatar-gen.html"},{"id":"signature-gen","title":"签名生成器","desc":"手绘板生成个性签名。","icon":"✍️","category":"fun","tags":["签名"],"url":"signature-gen.html"},{"id":"art-text","title":"艺术字生成器","desc":"生成各种艺术字效果。","icon":"✨","category":"fun","tags":["艺术字"],"url":"art-text.html"},{"id":"pixel-art","title":"像素画板","desc":"在线绘制像素画。","icon":"🎮","category":"fun","tags":["像素画","创意"],"url":"pixel-art.html"},{"id":"meme-gen","title":"梗图生成器","desc":"制作经典梗图。","icon":"🖼️","category":"fun","tags":["梗图","搞笑"],"url":"meme-gen.html"}];
+        var cats = [["all","全部"],["fav","⭐收藏"],["image","🖼️ 图片"],["text","📝 文本"],["dev","💻 开发"],["calc","🧮 计算"],["generator","✨ 生成"],["design","🎨 设计"],["life","⏰ 生活"],["office","📁 办公"],["learn","📚 学习"],["fun","🎮 趣味"]];
+        var curCat = 'all';
+        var favs = {};
+        try { favs = JSON.parse(localStorage.getItem('toolbox_favs') || '{}'); } catch(e) {}
+        function saveFavs() { try { localStorage.setItem('toolbox_favs', JSON.stringify(favs)); } catch(e) {} }
+        var catsEl = document.getElementById('cats');
+        cats.forEach(function(c) {
+            var el = document.createElement('div');
+            el.className = 'cat' + (c[0] === 'all' ? ' on' : '');
+            el.textContent = c[1];
+            el.onclick = function() {
+                curCat = c[0];
+                document.querySelectorAll('.cat').forEach(function(x){x.classList.remove('on')});
+                el.classList.add('on');
+                render();
+            };
+            catsEl.appendChild(el);
+        });
+        function render() {
+            var q = document.getElementById('q').value.trim().toLowerCase();
+            var grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            var list = tools.filter(function(t) {
+                if (curCat === 'fav' && !favs[t.id]) return false;
+                if (curCat !== 'all' && curCat !== 'fav' && t.category !== curCat) return false;
+                if (q && (t.title + t.desc + t.tags.join(' ')).toLowerCase().indexOf(q) < 0) return false;
+                return true;
+            });
+            document.getElementById('count').textContent = list.length + ' 个工具' + (q ? ' · 搜索"' + document.getElementById('q').value + '"' : '');
+            if (!list.length) {
+                grid.innerHTML = '<div class="empty">没有找到相关工具 🤔</div>';
+                return;
+            }
+            list.forEach(function(t) {
+                var a = document.createElement('a');
+                a.className = 'tool';
+                a.href = t.url;
+                a.innerHTML = '<div class="ico">' + t.icon + '</div><div class="tt">' + t.title + '</div><div class="dd">' + t.desc + '</div>';
+                var s = document.createElement('div');
+                s.className = 'star' + (favs[t.id] ? ' on' : '');
+                s.textContent = favs[t.id] ? '★' : '☆';
+                s.onclick = function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                    favs[t.id] = !favs[t.id];
+                    if (!favs[t.id]) delete favs[t.id];
+                    saveFavs();
+                    s.className = 'star' + (favs[t.id] ? ' on' : '');
+                    s.textContent = favs[t.id] ? '★' : '☆';
+                    if (curCat === 'fav') render();
+                };
+                a.appendChild(s);
+                grid.appendChild(a);
+            });
+        }
+        document.getElementById('q').addEventListener('input', render);
+        document.getElementById('rand').onclick = function() {
+            location.href = tools[Math.floor(Math.random() * tools.length)].url;
+        };
+        render();
+    </script>
+</body>
+</html>
