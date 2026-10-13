@@ -157,7 +157,7 @@ textarea.input{min-height:64px;resize:vertical}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
 .cal-w{text-align:center;font-size:11px;color:var(--muted);padding:4px 0}
 .cal-d{
-  aspect-ratio:1/1;border-radius:9px;border:1px solid transparent;display:flex;flex-direction:column;
+  min-height:52px;padding:5px 2px;border-radius:9px;border:1px solid transparent;display:flex;flex-direction:column;
   align-items:center;justify-content:center;font-size:13px;font-variant-numeric:tabular-nums;
 }
 .cal-d.has{background:var(--brand-soft);border-color:#D7EFE5}
@@ -286,9 +286,19 @@ textarea.input{min-height:64px;resize:vertical}
 .cal-d.work{background:#F2F4F5}
 .cal-d.work .cd-hol{color:#9AA4A9}
 .cal-d.mark .cd-dot{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--brand)}
-.cal-legend{display:flex;gap:12px;justify-content:center;margin-top:8px;font-size:11px;color:var(--muted)}
+.cal-legend{display:flex;flex-wrap:wrap;gap:6px 12px;justify-content:center;margin-top:14px;padding-top:10px;border-top:1px dashed var(--line);font-size:11px;color:var(--muted);position:relative;z-index:1}
 .cal-legend .lg.hol{color:#E4574C}.cal-legend .lg.work{color:#9AA4A9}
 .cal-legend .lg.mark{color:var(--brand)}
+.cal-lunar-line{font-size:12px;color:var(--muted);margin:-4px 0 10px}
+.cal-d .cd-lun{font-size:8px;color:var(--muted);margin-top:1px;line-height:1.15;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cal-d .cd-term{color:#3B9C82}
+.cal-d.sel .cd-lun{color:rgba(255,255,255,.85)}
+.cal-d.sel .cd-term{color:#fff}
+
+/* ---------- 导出账单 / 便签提醒 ---------- */
+.exp-sec{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:#fff}
+.exp-t{font-size:13px;font-weight:600;margin-bottom:8px;color:var(--brand-dark)}
+.exp-link{font-size:12px;background:#F5F8F7;border:1px solid var(--line);border-radius:8px;padding:8px 10px;word-break:break-all;color:var(--muted)}
 
 /* ---------- 日程列表 ---------- */
 .sched-list{display:flex;flex-direction:column;gap:8px}
