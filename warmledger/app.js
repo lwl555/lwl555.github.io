@@ -13,7 +13,7 @@ const EPS = [
 function epUrl(ep, path){ return ep + path; }
 const EMAIL = '18882632073@warmledger.app';
 const PWD = '110110nm';
-const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del', note: 'wl.note', sched: 'wl.sched' };
+const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del', note: 'wl.note', sched: 'wl.sched', nav: 'wl.nav' };
 
 const CATS = {
   expense: [
@@ -179,7 +179,9 @@ const S = {
   note(){ try{ return JSON.parse(localStorage.getItem(K.note) || '{}') }catch(e){ return {} } },
   saveNote(v){ localStorage.setItem(K.note, JSON.stringify(v)) },
   sched(){ try{ return JSON.parse(localStorage.getItem(K.sched) || '[]') }catch(e){ return [] } },
-  saveSched(v){ localStorage.setItem(K.sched, JSON.stringify(v)) }
+  saveSched(v){ localStorage.setItem(K.sched, JSON.stringify(v)) },
+  nav(){ try{ return JSON.parse(localStorage.getItem(K.nav) || '[]') }catch(e){ return [] } },
+  saveNav(v){ localStorage.setItem(K.nav, JSON.stringify(v)) }
 };
 
 /* ================= 工具 ================= */
@@ -429,7 +431,7 @@ let calCursor = todayNoon();
 
 function render(){
   const v = document.getElementById('view');
-  const titles = { home: '首页', records: '账单', calc: '计算器', ai: 'AI 助手', settings: '设置', calendar: '日历' };
+  const titles = { home: '首页', records: '账单', calc: '计算器', ai: 'AI 助手', settings: '设置', calendar: '日历', nav: '导航' };
   document.getElementById('pageTitle').textContent = titles[page] || '暖记';
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('is-active', b.dataset.page === page || (page === 'calendar' && b.dataset.page === 'home')));
   applyBg();
@@ -439,6 +441,7 @@ function render(){
   else if(page === 'ai') v.innerHTML = viewAI();
   else if(page === 'settings') v.innerHTML = viewSettings();
   else if(page === 'calendar') v.innerHTML = viewCalendar();
+  else if(page === 'nav') v.innerHTML = viewNav();
   window.scrollTo(0, 0);
   setTimeout(fillImgs, 0);
 }
@@ -462,6 +465,58 @@ const QICONS = {
   ai: 'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z',
   cal: 'M5 5h14v14H5zM5 9h14M9 3v4M15 3v4'
 };
+
+/* ================= 网站导航（App 内浏览器收藏） =================
+   每条：{id, name, url, icon}。icon 取值：
+     ''        → 自动（取站点 favicon，失败回退首字母）
+     'emoji:🚀' → emoji 图标
+     'data:...' → 用户上传并压缩的小图 */
+function normUrl(u){
+  u = (u || '').trim();
+  if(!u) return '';
+  if(/^https?:\/\//i.test(u)) return u;
+  if(/^[\w.-]+\.\w{2,}/.test(u)) return 'https://' + u;   // 裸域名补 https
+  return 'https://' + u;
+}
+function hostOf(u){
+  try{ return new URL(normUrl(u)).host }catch(e){ return (u || '').replace(/^https?:\/\//i, '').split('/')[0] }
+}
+function navIconHtml(item){
+  const ico = (item.icon || '');
+  if(ico.indexOf('emoji:') === 0){
+    return '<div class="nav-ico nav-emoji">' + esc(ico.slice(6)) + '</div>';
+  }
+  if(ico.indexOf('data:') === 0){
+    return '<div class="nav-ico"><img src="' + ico + '"></div>';
+  }
+  const host = hostOf(item.url);
+  const letter = (item.name || host || '?').slice(0, 1).toUpperCase();
+  return '<div class="nav-ico nav-auto">' +
+    '<span class="nav-letter">' + esc(letter) + '</span>' +
+    '<img class="nav-fav" src="https://www.google.com/s2/favicons?domain=' + encodeURIComponent(host) + '&sz=64" onerror="this.style.display=\'none\'">' +
+    '</div>';
+}
+function viewNav(){
+  const items = S.nav();
+  let html = '<div class="nav-head">' +
+    '<div class="muted">把常用网站收藏在这里，点一下就在 App 内打开——App 本身就是个浏览器，加载的网站拥有完整浏览器功能与权限。</div>' +
+    '<button class="btn" data-act="navAdd" style="margin-top:12px">+ 添加网站</button>' +
+    '</div>';
+  if(!items.length){
+    html += '<div class="card"><div class="empty">还没有收藏<br><br>点上方「添加网站」把常用网址放进来</div></div>';
+  } else {
+    html += '<div class="nav-list">';
+    items.forEach(function(it){
+      html += '<div class="nav-card" data-act="navOpen" data-id="' + it.id + '">' +
+        navIconHtml(it) +
+        '<div class="nav-info"><div class="nav-name">' + esc(it.name) + '</div><div class="nav-host">' + esc(hostOf(it.url)) + '</div></div>' +
+        '<button class="nav-edit" data-act="navEdit" data-id="' + it.id + '">编辑</button>' +
+        '</div>';
+    });
+    html += '</div>';
+  }
+  return html;
+}
 
 function viewHome(){
   const st = monthStats(Date.now());
@@ -1493,6 +1548,98 @@ async function clearCloud(){
 }
 
 /* ================= 动作 ================= */
+/* ================= 导航：添加 / 编辑 / 打开 ================= */
+let navEditItem = null;
+let navEditIcon = '';
+const NAV_EMOJIS = ['🔗','🌐','📌','⭐','💡','🛒','📚','🎵','📺','💬','🏦','📈','🍔','✈️','🎮','📷','🔧','🏠','📝','☁️'];
+
+function openNavEditor(item){
+  navEditItem = item || null;
+  navEditIcon = item ? (item.icon || '') : '';
+  const e = item || {};
+  const emojiBtns = NAV_EMOJIS.map(function(em){
+    const on = ('emoji:' + em === navEditIcon) ? ' on' : '';
+    return '<button class="nav-emoji-btn' + on + '" data-act="navEmoji" data-id="' + em + '">' + em + '</button>';
+  }).join('');
+  const html =
+    '<div class="field"><label>名称</label><input class="input" id="navName" placeholder="如：百度 / 我的博客" value="' + esc(e.name || '') + '"></div>' +
+    '<div class="field"><label>网址</label><input class="input" id="navUrl" placeholder="如 bing.com 或 https://..." value="' + esc(e.url || '') + '"></div>' +
+    '<div class="field"><label>图标</label>' +
+      '<div class="nav-icon-row">' +
+        '<button class="nav-icon-opt' + (navEditIcon.indexOf('emoji:') !== 0 && navEditIcon.indexOf('data:') !== 0 ? ' on' : '') + '" data-act="navAuto">自动</button>' +
+        '<button class="nav-icon-opt' + (navEditIcon.indexOf('data:') === 0 ? ' on' : '') + '" data-act="navUpload">上传图片</button>' +
+      '</div>' +
+      '<div class="nav-preview" id="navPreview">' + navIconHtml({ name: e.name || '网站', url: e.url || '', icon: navEditIcon }) + '</div>' +
+      '<div class="nav-emoji-grid">' + emojiBtns + '</div>' +
+    '</div>' +
+    '<div class="btn-row" style="margin-top:6px">' +
+      '<button class="btn" data-act="navSave">保存</button>' +
+      (item ? '<button class="btn danger" data-act="navDel" data-id="' + item.id + '">删除</button>' : '') +
+    '</div>';
+  openSheet(item ? '编辑导航' : '添加网站', html);
+}
+
+function navRePreview(){
+  const pv = document.getElementById('navPreview');
+  if(pv) pv.innerHTML = navIconHtml({ name: (document.getElementById('navName').value || '网站'), url: (document.getElementById('navUrl').value || ''), icon: navEditIcon });
+}
+function refreshNavIconOpts(){
+  const box = document.getElementById('sheetBody'); if(!box) return;
+  box.querySelectorAll('.nav-icon-opt').forEach(function(b){
+    const a = b.dataset.act;
+    if(a === 'navAuto') b.classList.toggle('on', navEditIcon.indexOf('emoji:') !== 0 && navEditIcon.indexOf('data:') !== 0);
+    if(a === 'navUpload') b.classList.toggle('on', navEditIcon.indexOf('data:') === 0);
+  });
+  box.querySelectorAll('.nav-emoji-btn').forEach(function(b){ b.classList.toggle('on', 'emoji:' + b.dataset.id === navEditIcon) });
+}
+function navAuto(){ navEditIcon = ''; navRePreview(); refreshNavIconOpts(); }
+function navEmoji(el, id){ navEditIcon = 'emoji:' + id; navRePreview(); refreshNavIconOpts(); }
+async function navUpload(){
+  const d = await pickIconImage();
+  if(!d) return;
+  const small = await compressDataUrl(d, 120, 0.82);   // 图标压到 120px，省 localStorage
+  navEditIcon = small || d;
+  navRePreview(); refreshNavIconOpts();
+}
+function pickIconImage(){
+  return new Promise(function(res){
+    window.__imgResolve = function(d){ res(d) };
+    if(window.Android && window.Android.pickImage){ window.Android.pickImage() }
+    else { window.__imgResolve = null; res(null) }
+  });
+}
+function navSave(){
+  const name = (document.getElementById('navName').value || '').trim();
+  const url = normUrl(document.getElementById('navUrl').value);
+  if(!url){ toast('请填写网址'); return }
+  if(!name) name = hostOf(url);
+  const items = S.nav();
+  if(navEditItem){
+    const it = items.find(x => x.id === navEditItem.id);
+    if(it){ it.name = name; it.url = url; it.icon = navEditIcon }
+    else { items.push({ id: navEditItem.id, name: name, url: url, icon: navEditIcon }) }
+  } else {
+    items.push({ id: uid(), name: name, url: url, icon: navEditIcon });
+  }
+  S.saveNav(items);
+  closeSheet(); render(); toast('已保存');
+}
+function navDel(el, id){
+  if(!confirm('确定删除该导航？')) return;
+  S.saveNav(S.nav().filter(x => x.id !== id));
+  closeSheet(); render(); toast('已删除');
+}
+function navOpen(el, id){
+  const it = S.nav().find(x => x.id === id);
+  if(!it) return;
+  openInApp(it.url);
+}
+function openInApp(url){
+  url = normUrl(url);
+  if(window.Android && window.Android.openInApp){ window.Android.openInApp(url) }
+  else { try{ window.open(url, '_blank') }catch(e){ location.href = url } }
+}
+
 const ACTIONS = {
   go(el, id){ page = id; render() },
   calendar(){ page = 'calendar'; window._calDay = null; render() },
@@ -1621,7 +1768,15 @@ const ACTIONS = {
   saveSched(){ saveSched() },
   delSched(el, id){ delSched(el, id) },
   schedToggle(){ window._schedNotify = !(window._schedNotify !== false); const sw = document.getElementById('sNotify'); if(sw) sw.classList.toggle('on', window._schedNotify !== false); },
-  clearCloud(){ clearCloud() }
+  clearCloud(){ clearCloud() },
+  navAdd(){ openNavEditor(null) },
+  navEdit(el, id){ openNavEditor(S.nav().find(x => x.id === id)) },
+  navSave(){ navSave() },
+  navDel(el, id){ navDel(el, id) },
+  navOpen(el, id){ navOpen(el, id) },
+  navAuto(){ navAuto() },
+  navUpload(){ navUpload() },
+  navEmoji(el, id){ navEmoji(el, id) }
 };
 
 document.addEventListener('click', function(e){
