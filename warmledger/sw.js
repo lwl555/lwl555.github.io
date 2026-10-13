@@ -1,5 +1,6 @@
-/* 暖记 service worker —— 让网站（含 App 内 WebView）断网也能打开、离线记账 */
-const CACHE = 'warmledger-v1';
+/* 暖记 service worker —— 让网站（含 App 内 WebView）断网也能打开、离线记账。
+   策略：本站 GET 一律「网络优先」，成功即回填缓存；断网时回退缓存，保证离线可用且更新立即可见。 */
+const CACHE = 'warmledger-v2';
 const ASSETS = ['index.html', 'app.js', 'style.css'];
 
 self.addEventListener('install', function (e) {
@@ -18,28 +19,13 @@ self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
-  if (url.origin !== self.location.origin) return; // 只缓存本站，supabase 请求放行
+  if (url.origin !== self.location.origin) return; // 只处理本站，supabase 请求放行
 
-  // 页面导航：网络优先，失败回退缓存（保证联网拿到最新、断网仍可用）
-  if (req.mode === 'navigate') {
-    e.respondWith(
-      fetch(req).then(function (r) {
-        var cp = r.clone();
-        caches.open(CACHE).then(function (c) { c.put('index.html', cp); });
-        return r;
-      }).catch(function () { return caches.match('index.html'); })
-    );
-    return;
-  }
-
-  // 静态资源：缓存优先，后台回填网络
   e.respondWith(
-    caches.match(req).then(function (cached) {
-      return cached || fetch(req).then(function (r) {
-        var cp = r.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, cp); });
-        return r;
-      });
-    })
+    fetch(req).then(function (r) {
+      var cp = r.clone();
+      caches.open(CACHE).then(function (c) { c.put(req, cp); });
+      return r;
+    }).catch(function () { return caches.match(req); })
   );
 });
