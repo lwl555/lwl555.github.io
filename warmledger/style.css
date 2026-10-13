@@ -272,3 +272,29 @@ textarea.input{min-height:64px;resize:vertical}
 .ai-thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
 .ai-thumbs .ai-thumb{margin-bottom:0;max-height:72px}
 .ai-thumbs .ai-thumb img{max-height:72px}
+
+/* ---------- 聊天发图 ---------- */
+.chat-img-btn{font-size:20px;background:none;border:0;padding:0 6px;line-height:1}
+.chat-img-wrap{margin-bottom:6px}
+.chat-img-thumb{max-width:160px;max-height:160px;border-radius:10px;display:block}
+
+/* ---------- 日历节假日 / 日程 ---------- */
+.cal-d{position:relative}
+.cal-d .cd-d{line-height:1.15}
+.cal-d .cd-hol{font-size:9px;color:#E4574C;margin-top:1px;line-height:1.1}
+.cal-d.hol{background:#FFF1EF;border-color:#F7D6D2}
+.cal-d.work{background:#F2F4F5}
+.cal-d.work .cd-hol{color:#9AA4A9}
+.cal-d.mark .cd-dot{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.cal-legend{display:flex;gap:12px;justify-content:center;margin-top:8px;font-size:11px;color:var(--muted)}
+.cal-legend .lg.hol{color:#E4574C}.cal-legend .lg.work{color:#9AA4A9}
+.cal-legend .lg.mark{color:var(--brand)}
+
+/* ---------- 日程列表 ---------- */
+.sched-list{display:flex;flex-direction:column;gap:8px}
+.sched-item{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
+.sched-item.nt{border-color:#F7D6D2;background:#FFF8F7}
+.sched-l{min-width:0;flex:1}
+.sched-t{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-n{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-time{font-size:13px;color:var(--brand-dark);font-variant-numeric:tabular-nums;flex:0 0 auto}
