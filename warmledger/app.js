@@ -13,7 +13,7 @@ const EPS = [
 function epUrl(ep, path){ return ep + path; }
 const EMAIL = '18882632073@warmledger.app';
 const PWD = '110110nm';
-const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del' };
+const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del', note: 'wl.note', sched: 'wl.sched' };
 
 const CATS = {
   expense: [
@@ -134,7 +134,7 @@ function ttsSpeak(text){
 }
 
 /* ================= 小账对话（复用 ai-accounting 的 analyze 模式，前端维护多轮历史） ================= */
-const CHAT = { list: [], open: false, busy: false };
+const CHAT = { list: [], open: false, busy: false, pendingImg: null };
 function chatPush(role, text){ CHAT.list.push({ role: role, text: text }) }
 
 const CALCS = [
@@ -162,7 +162,11 @@ const S = {
   ep(){ return localStorage.getItem(K.ep) || EPS[0] },
   saveEp(v){ localStorage.setItem(K.ep, v) },
   del(){ try{ return JSON.parse(localStorage.getItem(K.del) || '[]') }catch(e){ return [] } },
-  saveDel(v){ localStorage.setItem(K.del, JSON.stringify(v)) }
+  saveDel(v){ localStorage.setItem(K.del, JSON.stringify(v)) },
+  note(){ try{ return JSON.parse(localStorage.getItem(K.note) || '{}') }catch(e){ return {} } },
+  saveNote(v){ localStorage.setItem(K.note, JSON.stringify(v)) },
+  sched(){ try{ return JSON.parse(localStorage.getItem(K.sched) || '[]') }catch(e){ return [] } },
+  saveSched(v){ localStorage.setItem(K.sched, JSON.stringify(v)) }
 };
 
 /* ================= 工具 ================= */
@@ -578,6 +582,23 @@ function viewSettings(){
 }
 
 /* ---------- 日历 ---------- */
+/* ================= 节假日（2026 国务院安排，含调休补班） ================= */
+const HOLIDAYS = {
+  '2026-01-01':'元旦','2026-01-02':'元旦','2026-01-03':'元旦',
+  '2026-02-15':'春节','2026-02-16':'春节','2026-02-17':'春节','2026-02-18':'春节','2026-02-19':'春节','2026-02-20':'春节','2026-02-21':'春节','2026-02-22':'春节','2026-02-23':'春节',
+  '2026-04-04':'清明','2026-04-05':'清明','2026-04-06':'清明',
+  '2026-05-01':'劳动','2026-05-02':'劳动','2026-05-03':'劳动','2026-05-04':'劳动','2026-05-05':'劳动',
+  '2026-06-19':'端午','2026-06-20':'端午','2026-06-21':'端午',
+  '2026-09-25':'中秋','2026-09-26':'中秋','2026-09-27':'中秋',
+  '2026-10-01':'国庆','2026-10-02':'国庆','2026-10-03':'国庆','2026-10-04':'国庆','2026-10-05':'国庆','2026-10-06':'国庆','2026-10-07':'国庆',
+  '2026-01-04':'调休班','2026-02-14':'调休班','2026-02-28':'调休班','2026-05-09':'调休班','2026-09-20':'调休班','2026-10-10':'调休班'
+};
+function holidayName(k){ return HOLIDAYS[k] || '' }
+function daySchedules(k){
+  return S.sched().filter(function(s){ return s.date === k }).sort(function(a,b){ return (a.time||'').localeCompare(b.time||'') });
+}
+function dayHasSched(k){ return S.sched().some(function(s){ return s.date === k }) }
+
 function viewCalendar(){
   const d = new Date(calCursor);
   const y = d.getFullYear(), m = d.getMonth();
@@ -597,15 +618,41 @@ function viewCalendar(){
     const ms = new Date(y, m, day, 12, 0, 0).getTime();
     const k = ymd(ms);
     const amt = byDay[k] || 0;
-    html += '<button class="cal-d ' + (amt ? 'has' : '') + (k === todayKey ? ' today' : '') + '" data-act="calDay" data-id="' + k + '">' +
-      '<span>' + day + '</span>' + (amt ? '<span class="cd-amt">' + Math.round(amt) + '</span>' : '') + '</button>';
+    const hl = holidayName(k);
+    const isWork = hl === '调休班';
+    const mark = dayHasSched(k);
+    html += '<button class="cal-d ' + (amt ? 'has' : '') + (k === todayKey ? ' today' : '') + (hl && !isWork ? ' hol' : '') + (isWork ? ' work' : '') + (mark ? ' mark' : '') + (window._calDay === k ? ' sel' : '') + '" data-act="calDay" data-id="' + k + '">' +
+      '<span class="cd-d">' + day + '</span>' +
+      (hl ? '<span class="cd-hol">' + hl + '</span>' : '') +
+      (amt ? '<span class="cd-amt">' + Math.round(amt) + '</span>' : '') +
+      (mark ? '<span class="cd-dot"></span>' : '') +
+      '</button>';
   }
-  html += '</div></div>';
+  html += '</div><div class="cal-legend"><span class="lg hol">红=节假日</span><span class="lg work">灰=补班</span><span class="lg mark">●=有日程</span></div></div>';
   const sel = window._calDay;
   if(sel){
     const list = S.tx().filter(t => ymd(t.date) === sel).sort((a, b) => b.createdAt - a.createdAt);
-    html += '<div class="card"><h3 class="card-title">' + sel + '（' + list.length + ' 笔）</h3>' +
-      (list.length ? list.map(txRow).join('') : '<div class="empty">这天没有记录</div>') + '</div>';
+    const notes = S.note();
+    const noteVal = notes[sel] || '';
+    const sch = daySchedules(sel);
+    const hn = holidayName(sel);
+    html += '<div class="card"><h3 class="card-title">' + sel + (hn ? ' · ' + hn : '') + '</h3>';
+    html += '<div class="field"><label>日汇记 / 便签</label><textarea class="input" id="dayNote" data-id="' + sel + '" placeholder="记点今天的碎碎念、待办、感想…">' + esc(noteVal) + '</textarea></div>';
+    html += '<div class="row between" style="margin:6px 0 10px"><span class="card-title" style="margin:0">日程 / 提醒（' + sch.length + '）</span><button class="tb-action" data-act="openSched" data-id="' + sel + '">+ 添加</button></div>';
+    if(sch.length){
+      html += '<div class="sched-list">' + sch.map(function(s){
+        return '<div class="sched-item ' + (s.notify ? 'nt' : '') + '" data-act="openSched" data-id="' + sel + '|' + s.id + '">' +
+          '<div class="sched-l"><div class="sched-t">' + esc(s.title) + (s.notify ? ' 🔔' : '') + '</div>' +
+          (s.note ? '<div class="sched-n">' + esc(s.note) + '</div>' : '') + '</div>' +
+          '<div class="sched-time">' + (s.time || '') + '</div></div>';
+      }).join('') + '</div>';
+    } else {
+      html += '<div class="empty" style="padding:14px 0">这天还没有日程，点“添加”约一下～</div>';
+    }
+    html += '</div>';
+    if(list.length){
+      html += '<div class="card"><h3 class="card-title">' + sel + ' 账单（' + list.length + ' 笔）</h3>' + list.map(txRow).join('') + '</div>';
+    }
   }
   return html;
 }
@@ -1110,7 +1157,8 @@ function renderChat(){
     return;
   }
   box.innerHTML = CHAT.list.map(function(m){
-    return '<div class="chat-msg ' + m.role + '"><div class="bubble">' + mdLite(m.text) + '</div></div>';
+    const img = m.img ? '<div class="chat-img-wrap"><img class="chat-img-thumb" src="' + m.img + '" alt="图片"></div>' : '';
+    return '<div class="chat-msg ' + m.role + '"><div class="bubble">' + img + mdLite(m.text) + '</div></div>';
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -1118,9 +1166,11 @@ async function sendChat(){
   if(CHAT.busy) return;
   const inp = document.getElementById('chatInput');
   const text = (inp && inp.value || '').trim();
-  if(!text) return;
+  const img = CHAT.pendingImg || null;
+  if(!text && !img) return;
   inp.value = '';
-  chatPush('user', text);
+  CHAT.pendingImg = null;
+  CHAT.list.push({ role:'user', text: text || '（发了一张图片）', img: img });
   renderChat();
   CHAT.busy = true;
   const box = document.getElementById('chatBox');
@@ -1131,19 +1181,31 @@ async function sendChat(){
   box.scrollTop = box.scrollHeight;
   try{
     await login();
-    const hist = CHAT.list.slice(0, -1).map(function(m){ return { role: m.role, text: m.text } });
-    const text = CHAT.list[CHAT.list.length - 1].text;
+    // 带图时先识别图中内容（兼容旧后端也能“读图”）
+    let imgText = '';
+    if(img){
+      try{
+        const rr = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'recognize', image: img } });
+        if(rr && rr.items && rr.items.length){
+          imgText = rr.items.map(function(it){ return (it.amount ? ('¥' + it.amount + ' ') : '') + (it.category || '') + (it.note ? (' ' + it.note) : '') }).join('\n');
+        }
+      }catch(e){ /* 忽略识别失败 */ }
+    }
+    const hist = CHAT.list.slice(0, -1).map(function(m){ return { role:m.role, text:m.text } });
+    const lastText = CHAT.list[CHAT.list.length - 1].text;
+    const augText = (imgText ? '【图片中识别到的内容】\n' + imgText + '\n\n' : '') + lastText;
     let r, reply;
     try{
-      r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'agent', text: text, history: hist } });
+      r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: augText, history: hist, image: img } });
       if(r && r.text) reply = r.text;
-    }catch(e){ /* agent 模式未部署，下面走 analyze 兜底 */ }
+    }catch(e){ /* agent 未部署，下面走 analyze 兜底 */ }
     if(!reply){
-      const prompt = '你是记账 App「暖记」的 AI 助手“小账”。若用户要你执行操作（记账/计算/查账/生成背景），只输出一个 ```json 工具块 ```（{"tool":"add_tx|calc|query|gen_bg","args":{...}}），不要其它文字；其它情况用自然语言简洁回答。' +
+      const prompt = '你是记账 App「暖记」的 AI 助手“小账”，也是百事通贴心小助理：可以聊记账省钱，也可以聊生活、健康、情感、出行、百科等任何话题，像朋友一样自然。' +
+        '若用户要你执行操作（记账/计算/查账/生成背景），只输出一个 ```json 工具块 ```（{"tool":"add_tx|calc|query|gen_bg","args":{...}}），不要其它文字；其它情况用自然语言简洁友好回答（200 字内）。' +
         '分类id：餐饮food/外卖takeout/交通transport/加油fuel/购物shopping/居家home/房租rent/水电燃气utility/数码digital/通讯comm/娱乐fun/旅行travel/美容beauty/医疗medical/宠物pet/教育edu/运动sport/咖啡coffee/菜场超市market/人情social/保险insurance/订阅会员subscription/税费tax_fee/其他other_exp / 工资salary/奖金bonus/理财收益invest/兼职parttime/红包redpacket_in/分红dividend/退款refund/租金收入rental_in/零花钱allowance/其他收入other_inc。' +
         'calc 参数：discount{orig:原价,discount:折扣如8.5表85折} rise{old:原价,now:现价} installment{total:总额,periods:期数,rate:每期手续费率%}。query 参数：month_exp|month_inc|balance|today_exp|top_cat。金额自动转阿拉伯数字，直接执行不要反问。' +
-        '对话历史：\n' + hist.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text }).join('\n') + '\n用户：' + text;
-      r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'analyze', text: prompt } });
+        '对话历史：\n' + hist.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text }).join('\n') + '\n用户：' + augText;
+      r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'analyze', text: prompt, image: img } });
       reply = (r && r.text) || '（没收到回复）';
     }
     const tool = extractTool(reply);
@@ -1164,6 +1226,77 @@ async function sendChat(){
     renderChat();
   }
   CHAT.busy = false;
+}
+
+/* ================= 聊天发图 ================= */
+function chatPickImg(){
+  if(window.Android && (window.Android.pickImage || window.Android.pickImages)){
+    window.__imgResolve = function(dataUrl){
+      window.__imgResolve = null;
+      if(dataUrl){ CHAT.pendingImg = dataUrl; renderChat(); toast('已选图片，点发送发给小账') }
+    };
+    try{ window.Android.pickImage() }catch(e){}
+    return;
+  }
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = async function(e){
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    CHAT.pendingImg = await compressImage(f, 1200, 0.7);
+    renderChat();
+  };
+  inp.click();
+}
+
+/* ================= 日程 / 提醒 ================= */
+function openSched(id){
+  const p = (id || '').split('|');
+  const date = p[0] || window._calDay;
+  const sid = p[1];
+  let s = { title:'', time:'09:00', note:'', notify:true };
+  if(sid){ const ex = S.sched().find(x => x.id === sid); if(ex) s = ex; }
+  window._schedNotify = (s.notify !== false);
+  openSheet('日程 / 提醒', '' +
+    (sid ? '<input type="hidden" id="sId" value="' + sid + '">' : '') +
+    '<input type="hidden" id="sDate" value="' + date + '">' +
+    '<div class="field"><label>标题</label><input class="input" id="sTitle" value="' + esc(s.title) + '" placeholder="如 看牙医 / 给妈打电话"></div>' +
+    '<div class="field"><label>时间</label><input class="input" id="sTime" type="time" value="' + (s.time || '09:00') + '"></div>' +
+    '<div class="field"><label>备注</label><textarea class="input" id="sNote" placeholder="选填">' + esc(s.note || '') + '</textarea></div>' +
+    '<div class="setting-row"><span>到时通知我（手机通知栏 + 声音）</span><div class="switch ' + (s.notify !== false ? 'on' : '') + '" data-act="schedToggle" id="sNotify"><i></i></div></div>' +
+    '<div class="btn-row">' +
+      '<button class="btn ghost" data-act="close">取消</button>' +
+      '<button class="btn" data-act="saveSched">' + (sid ? '保存' : '添加') + '</button>' +
+    '</div>' +
+    (sid ? '<button class="btn danger" style="margin-top:10px" data-act="delSched" data-id="' + sid + '">删除</button>' : '')
+  );
+}
+function saveSched(){
+  const date = (document.getElementById('sDate') || {}).value;
+  const title = ((document.getElementById('sTitle') || {}).value || '').trim();
+  const time = ((document.getElementById('sTime') || {}).value || '09:00');
+  const note = ((document.getElementById('sNote') || {}).value || '').trim();
+  const notify = window._schedNotify !== false;
+  if(!title){ toast('请填写标题'); return }
+  const sid = (document.getElementById('sId') || {}).value;
+  const arr = S.sched();
+  let item;
+  if(sid){ const i = arr.findIndex(x => x.id === sid); if(i >= 0) item = Object.assign(arr[i], { title:title, time:time, note:note, notify:notify }); }
+  else { item = { id: uid(), date:date, time:time, title:title, note:note, notify:notify, createdAt: Date.now() }; arr.push(item); }
+  S.saveSched(arr);
+  if(notify && window.Android && typeof window.Android.scheduleReminder === 'function'){
+    const pr = date.split('-'); const pt = time.split(':');
+    const when = new Date(+pr[0], +pr[1]-1, +pr[2], +pt[0], +pt[1], 0).getTime();
+    if(when > Date.now()){
+      window.Android.scheduleReminder(item.title, (note ? note + ' · ' : '') + date, when, item.id);
+      toast('已设定提醒，到时手机会响铃');
+    } else { toast('时间已过，未设定提醒') }
+  }
+  closeSheet(); render();
+}
+function delSched(el, id){
+  S.saveSched(S.sched().filter(x => x.id !== id));
+  closeSheet(); render(); toast('已删除');
 }
 
 /* ================= 图片查看器 ================= */
@@ -1393,6 +1526,7 @@ const ACTIONS = {
     S.saveTx([]); render(); toast('已清空本地');
   },
   openChat(){ openChat() },
+  chatImg(){ chatPickImg() },
   closeChat(){ closeChat() },
   sendChat(){ sendChat() },
   viewImg(el, id){ viewImg(el, id) },
@@ -1414,6 +1548,10 @@ const ACTIONS = {
   saveAccount(){ saveAccount() },
   logoutAccount(){ logoutAccount() },
   syncManage(){ syncManage() },
+  openSched(el, id){ openSched(id) },
+  saveSched(){ saveSched() },
+  delSched(el, id){ delSched(el, id) },
+  schedToggle(){ window._schedNotify = !(window._schedNotify !== false); const sw = document.getElementById('sNotify'); if(sw) sw.classList.toggle('on', window._schedNotify !== false); },
   clearCloud(){ clearCloud() }
 };
 
@@ -1425,6 +1563,8 @@ document.addEventListener('click', function(e){
 });
 
 document.addEventListener('input', function(e){
+  const dn = e.target.closest('#dayNote');
+  if(dn){ const notes = S.note(); notes[dn.dataset.id] = dn.value; S.saveNote(notes); return; }
   const body = document.getElementById('sheetBody');
   if(!body || !body.dataset.calc) return;
   const key = body.dataset.calc;
