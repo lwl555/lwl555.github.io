@@ -481,9 +481,9 @@ function viewHome(){
 }
 
 function txRow(t){
-  return '<div class="tx" data-act="edit" data-id="' + t.id + '">' +
+  return '<div class="tx" data-act="txView" data-id="' + t.id + '">' +
     '<div class="tx-dot">' + esc((CATN[t.category] || '?').slice(0, 1)) + '</div>' +
-    (t.imgId ? '<img class="tx-img" data-img="' + t.imgId + '">' : '') +
+    (t.imgId ? '<img class="tx-img" data-act="viewImg" data-id="' + t.imgId + '">' : '') +
     '<div class="tx-main">' +
       '<div class="tx-cat">' + esc(CATN[t.category] || t.category) + '</div>' +
       '<div class="tx-note">' + esc(t.note || ymd(t.date)) + '</div>' +
@@ -496,6 +496,33 @@ function fillImgs(){
     const id = el.dataset.img; if(!id || el.src) return;
     imgComp(id).then(function(u){ if(u) el.src = u; });
   });
+}
+
+/* 记账详情（只读查看，可再编辑/删除） */
+function txView(el, id){
+  const t = S.tx().find(x => x.id === id);
+  if(!t) return;
+  const synced = t.synced ? '已同步云端' : (t.remote_id ? '已同步' : '仅本地');
+  let html = '<div class="card">';
+  if(t.imgId){
+    html += '<img class="tx-detail-img" data-img="' + t.imgId + '" data-act="viewImg" data-id="' + t.imgId + '" ' +
+      'style="width:100%;max-height:240px;object-fit:cover;border-radius:10px;margin-bottom:12px;cursor:pointer">';
+  }
+  html += '<div class="row between" style="padding:7px 0"><span class="muted">类型</span><b>' + (t.type === 'income' ? '收入' : '支出') + '</b></div>' +
+    '<div class="row between" style="padding:7px 0"><span class="muted">金额</span><b class="' + t.type + '">' + (t.type === 'income' ? '+' : '-') + money(t.amount) + '</b></div>' +
+    '<div class="row between" style="padding:7px 0"><span class="muted">分类</span><b>' + esc(CATN[t.category] || t.category) + '</b></div>' +
+    '<div class="row between" style="padding:7px 0"><span class="muted">日期</span><b>' + esc(ymd(t.date)) + '</b></div>' +
+    (t.note ? '<div class="row between" style="padding:7px 0;align-items:flex-start"><span class="muted" style="flex:0 0 auto">备注</span><b style="font-weight:400;max-width:62%;text-align:right">' + esc(t.note) + '</b></div>' : '') +
+    '<div class="row between" style="padding:7px 0"><span class="muted">同步状态</span><b>' + synced + '</b></div>' +
+    '</div>' +
+    '<div class="btn-row">' +
+      '<button class="btn ghost" data-act="edit" data-id="' + t.id + '">编辑</button>' +
+      '<button class="btn danger" data-act="delTx" data-id="' + t.id + '">删除</button>' +
+    '</div>';
+  openSheet('账单详情', html);
+  if(t.imgId){
+    imgComp(t.imgId).then(function(u){ const im = document.querySelector('#sheetBody .tx-detail-img'); if(im && u) im.src = u; });
+  }
 }
 
 function viewRecords(){
@@ -1190,32 +1217,51 @@ async function sendChat(){
   box.scrollTop = box.scrollHeight;
   try{
     await login();
-    // 带图时先识别图中内容（兼容旧后端也能“读图”）
+    const hist = CHAT.list.slice(0, -1).map(function(m){ return { role:m.role, text:m.text } });
+    const lastText = CHAT.list[CHAT.list.length - 1].text;
+    let reply = null;
     let imgText = '';
     if(img){
+      // 先用识图把图中文字/账单读出来（兼容旧后端也能“读图”）
       try{
         const rr = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'recognize', image: img } });
         if(rr && rr.items && rr.items.length){
           imgText = rr.items.map(function(it){ return (it.amount ? ('¥' + it.amount + ' ') : '') + (it.category || '') + (it.note ? (' ' + it.note) : '') }).join('\n');
         }
       }catch(e){ /* 忽略识别失败 */ }
-    }
-    const hist = CHAT.list.slice(0, -1).map(function(m){ return { role:m.role, text:m.text } });
-    const lastText = CHAT.list[CHAT.list.length - 1].text;
-    const augText = (imgText ? '【图片中识别到的内容】\n' + imgText + '\n\n' : '') + lastText;
-    let r, reply;
-    try{
-      r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: augText, history: hist, image: img } });
-      if(r && r.text) reply = r.text;
-    }catch(e){ /* agent 未部署，下面走 analyze 兜底 */ }
-    if(!reply){
-      const prompt = '你是记账 App「暖记」的 AI 助手“小账”，也是百事通贴心小助理：可以聊记账省钱，也可以聊生活、健康、情感、出行、百科等任何话题，像朋友一样自然。' +
-        '若用户要你执行操作（记账/计算/查账/生成背景），只输出一个 ```json 工具块 ```（{"tool":"add_tx|calc|query|gen_bg","args":{...}}），不要其它文字；其它情况用自然语言简洁友好回答（200 字内）。' +
-        '分类id：餐饮food/外卖takeout/交通transport/加油fuel/购物shopping/居家home/房租rent/水电燃气utility/数码digital/通讯comm/娱乐fun/旅行travel/美容beauty/医疗medical/宠物pet/教育edu/运动sport/咖啡coffee/菜场超市market/人情social/保险insurance/订阅会员subscription/税费tax_fee/其他other_exp / 工资salary/奖金bonus/理财收益invest/兼职parttime/红包redpacket_in/分红dividend/退款refund/租金收入rental_in/零花钱allowance/其他收入other_inc。' +
-        'calc 参数：discount{orig:原价,discount:折扣如8.5表85折} rise{old:原价,now:现价} installment{total:总额,periods:期数,rate:每期手续费率%}。query 参数：month_exp|month_inc|balance|today_exp|top_cat。金额自动转阿拉伯数字，直接执行不要反问。' +
-        '对话历史：\n' + hist.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text }).join('\n') + '\n用户：' + augText;
-      r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'analyze', text: prompt, image: img } });
-      reply = (r && r.text) || '（没收到回复）';
+      const augText = (imgText ? '【图片中识别到的内容】\n' + imgText + '\n\n' : '') + lastText;
+      // 优先让后端多模态“看”图（agent/image 模式，需要部署后端）
+      try{
+        const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: augText, history: hist, image: img } });
+        if(r && r.text) reply = r.text;
+      }catch(e){ /* 未部署多模态，下面兜底 */ }
+      if(!reply){
+        try{
+          const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'analyze', text: augText, history: hist } });
+          if(r && r.text) reply = r.text;
+        }catch(e){}
+      }
+      // 图片既没被“看”到、也没识别出文字：诚实说明，不假装看见
+      if(!reply && !imgText){
+        reply = '我收到图片啦～不过目前我只能识别图片里的文字、小票、账单这类内容，还看不到画面本身（比如景物、人物）。' +
+          '想让我真正“看图”，需要开启云端图像能力（后端已写好，部署即可）。' +
+          (lastText && lastText !== '（发了一张图片）' ? '你写的「' + lastText + '」我收到了，可以再描述一下图片内容，我帮你分析～' : '你可以告诉我图片里是什么，我帮你分析～');
+      }
+    } else {
+      // 纯文本：优先 agent，未部署则 analyze 兜底
+      try{
+        const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: lastText, history: hist } });
+        if(r && r.text) reply = r.text;
+      }catch(e){}
+      if(!reply){
+        const prompt = '你是记账 App「暖记」的 AI 助手“小账”，也是百事通贴心小助理：可以聊记账省钱，也可以聊生活、健康、情感、出行、百科等任何话题，像朋友一样自然。' +
+          '若用户要你执行操作（记账/计算/查账/生成背景），只输出一个 ```json 工具块 ```（{"tool":"add_tx|calc|query|gen_bg","args":{...}}），不要其它文字；其它情况用自然语言简洁友好回答（200 字内）。' +
+          '分类id：餐饮food/外卖takeout/交通transport/加油fuel/购物shopping/居家home/房租rent/水电燃气utility/数码digital/通讯comm/娱乐fun/旅行travel/美容beauty/医疗medical/宠物pet/教育edu/运动sport/咖啡coffee/菜场超市market/人情social/保险insurance/订阅会员subscription/税费tax_fee/其他other_exp / 工资salary/奖金bonus/理财收益invest/兼职parttime/红包redpacket_in/分红dividend/退款refund/租金收入rental_in/零花钱allowance/其他收入other_inc。' +
+          'calc 参数：discount{orig:原价,discount:折扣如8.5表85折} rise{old:原价,now:现价} installment{total:总额,periods:期数,rate:每期手续费率%}。query 参数：month_exp|month_inc|balance|today_exp|top_cat。金额自动转阿拉伯数字，直接执行不要反问。' +
+          '对话历史：\n' + hist.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text }).join('\n') + '\n用户：' + lastText;
+        const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'analyze', text: prompt, history: hist } });
+        reply = (r && r.text) || '（没收到回复）';
+      }
     }
     const tool = extractTool(reply);
     if(typing.parentNode) typing.parentNode.removeChild(typing);
@@ -1467,6 +1513,7 @@ const ACTIONS = {
     closeSheet(); render(); toast(id ? '已更新' : '已记录');
   },
   delTx(el, id){ delTx(id); closeSheet(); render(); toast('已删除') },
+  txView(el, id){ txView(el, id) },
   edit(el, id){
     const t = S.tx().find(x => x.id === id);
     if(!t) return;
