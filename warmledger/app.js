@@ -16,8 +16,18 @@ const PWD = '110110nm';
 const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del' };
 
 const CATS = {
-  expense: [['food','餐饮'],['transport','交通'],['shopping','购物'],['home','居家'],['fun','娱乐'],['takeout','外卖'],['study','学习'],['medical','医疗'],['social','人情'],['other_exp','其他']],
-  income: [['salary','工资'],['bonus','奖金'],['invest','理财'],['parttime','兼职'],['other_inc','其他']]
+  expense: [
+    ['food','餐饮'],['takeout','外卖'],['transport','交通'],['fuel','加油'],
+    ['shopping','购物'],['home','居家'],['rent','房租'],['utility','水电燃气'],
+    ['digital','数码'],['comm','通讯'],['fun','娱乐'],['travel','旅行'],
+    ['beauty','美容'],['medical','医疗'],['pet','宠物'],['edu','教育'],
+    ['sport','运动'],['coffee','咖啡'],['market','菜场超市'],['social','人情'],
+    ['insurance','保险'],['subscription','订阅会员'],['tax_fee','税费'],['other_exp','其他']
+  ],
+  income: [
+    ['salary','工资'],['bonus','奖金'],['invest','理财收益'],['parttime','兼职'],
+    ['redpacket_in','红包'],['dividend','分红'],['refund','退款'],['rental_in','租金收入'],['allowance','零花钱'],['other_inc','其他收入']
+  ]
 };
 const CATN = {};
 CATS.expense.forEach(c => CATN[c[0]] = c[1]);
@@ -39,6 +49,94 @@ const BGS = [
   ['#FFF3F5', '浅樱'], ['#F4F7FF', '浅雾'], ['#FBFBF4', '米白']
 ];
 
+/* ================= 自定义后台（可选） =================
+   默认用内置固定账号（林 / 18882632073）自动登录免费 Supabase。
+   高级用户可在「账号中心」填入自己的 Supabase 项目地址与账号，切换到自己的后台。
+   留空则用默认。 */
+const DEF_SB = 'https://wcnssyiqitugqfmcbdhe.supabase.co';
+function customSB(){ const s = S.set(); return (s.sbUrl && s.sbUrl.trim()) || ''; }
+function customCred(){ const s = S.set(); return { email: (s.accEmail && s.accEmail.trim()) || EMAIL, pwd: s.accPwd || PWD }; }
+/* 当前生效的后台地址：用户自定义优先，否则默认免费 Supabase */
+function baseUrl(){ return customSB() || DEF_SB; }
+
+/* ================= 图片存储（IndexedDB，原图完整保留） =================
+   账单表无图片列，所以原图存在浏览器本地 IndexedDB，账单只存图片 id；
+   压缩图在同步时尝试写入后台（若表无 img 列则静默失败，不影响）。 */
+const IMGDB = 'warmledger_img';
+function imgDB(){
+  return new Promise(function(res, rej){
+    const r = indexedDB.open(IMGDB, 1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore('imgs', { keyPath: 'id' }) };
+    r.onsuccess = function(){ res(r.result) };
+    r.onerror = function(){ rej(r.error) };
+  });
+}
+async function imgPut(id, blob){
+  const db = await imgDB();
+  return new Promise(function(res, rej){
+    const tx = db.transaction('imgs', 'readwrite');
+    tx.objectStore('imgs').put({ id: id, blob: blob, ts: Date.now() });
+    tx.oncomplete = function(){ res() }; tx.onerror = function(){ rej(tx.error) };
+  });
+}
+async function imgGet(id){
+  if(!id) return null;
+  const db = await imgDB();
+  return new Promise(function(res){
+    const tx = db.transaction('imgs', 'readonly');
+    const q = tx.objectStore('imgs').get(id);
+    q.onsuccess = function(){ res(q.result ? (q.result.blob || q.result) : null) };
+    q.onerror = function(){ res(null) };
+  });
+}
+async function imgOrig(id){ const v = await imgGet(id); return v && typeof v === 'object' ? (v.orig || v.blob) : v; }
+async function imgComp(id){ const v = await imgGet(id); return v && typeof v === 'object' ? (v.comp || v.blob) : v; }
+async function imgToDataUrl(blob){
+  if(!blob) return null;
+  return new Promise(function(res){ const r = new FileReader(); r.onload = function(){ res(r.result) }; r.readAsDataURL(blob) });
+}
+/* 把图片文件转 dataURL，并按最大边压缩（控制后台体积最小）。返回 {origUrl(原图存IndexedDB), compUrl(压缩图 base64)} */
+async function compressImage(file, maxSide, quality){
+  const origUrl = await new Promise(function(res){ const r = new FileReader(); r.onload = function(){ res(r.result) }; r.readAsDataURL(file) });
+  const img = await new Promise(function(res, rej){ const im = new Image(); im.onload = function(){ res(im) }; im.onerror = rej; im.src = origUrl });
+  const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+  const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(img, 0, 0, w, h);
+  const compUrl = cv.toDataURL('image/jpeg', quality || 0.6);
+  return { origUrl: origUrl, compUrl: compUrl };
+}
+
+/* ================= 本地 TTS（Web Speech API，系统中文语音，离线可用） ================= */
+const TTS = { synth: window.speechSynthesis, voice: null, enabled: false };
+function ttsInit(){
+  try{
+    if(!('speechSynthesis' in window)){ TTS.synth = null; return }
+    const pick = function(){
+      const vs = TTS.synth.getVoices() || [];
+      // 优选中文（普通话）女声，名字含 zh / 普通话 / Chinese / Xiaoxiao / Tingting 等
+      const zh = vs.filter(function(v){ return /zh|cmn|Chinese|普通话|国语|xiaoxiao|tingting|mei|yaoyao|huihui/i.test(v.lang + ' ' + v.name) });
+      TTS.voice = zh[0] || null;
+    };
+    pick();
+    TTS.synth.onvoiceschanged = pick;
+  }catch(e){ TTS.synth = null }
+}
+function ttsSpeak(text){
+  if(!TTS.synth || !TTS.enabled) return;
+  try{
+    TTS.synth.cancel();
+    const u = new SpeechSynthesisUtterance(String(text || '').replace(/[#,*_\-]+/g, ' ').slice(0, 400));
+    u.lang = 'zh-CN'; u.rate = 1.0; u.pitch = 1.0;
+    if(TTS.voice) u.voice = TTS.voice;
+    TTS.synth.speak(u);
+  }catch(e){}
+}
+
+/* ================= 小账对话（复用 ai-accounting 的 analyze 模式，前端维护多轮历史） ================= */
+const CHAT = { list: [], open: false, busy: false };
+function chatPush(role, text){ CHAT.list.push({ role: role, text: text }) }
+
 const CALCS = [
   ['budget','预算','看本月还能花多少','M4 6h16M4 12h16M4 18h10'],
   ['loan','房贷/车贷','等额本息月供','M4 18V8l8-5 8 5v10M9 18v-6h6v6'],
@@ -47,7 +145,10 @@ const CALCS = [
   ['fx','汇率换算','外币转人民币','M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4'],
   ['tax','个税计算','月薪到手多少','M9 7h6M9 12h6M9 17h6M5 5h14v14H5z'],
   ['tip','小费/服务费','按比例算小费','M12 5v14M8 9h8M8 13h8'],
-  ['invest','复利收益','本金滚多少年','M4 19V5M4 19h16M8 15l4-5 3 3 4-7']
+  ['invest','复利收益','本金滚多少年','M4 19V5M4 19h16M8 15l4-5 3 3 4-7'],
+  ['discount','折扣价','原价打几折到手多少','M5 9h14M5 9l-1 6h16l-1-6M9 9V6a3 3 0 016 0v3'],
+  ['rise','涨跌幅度','涨了还是跌了多少','M4 17l5-5 3 3 7-8M16 7h4v4'],
+  ['installment','分期还款','分几期每期多少','M4 7h16v10H4zM4 11h16M9 7v10']
 ];
 
 /* ================= 存储 ================= */
@@ -160,14 +261,12 @@ async function browserApi(method, url, headers, body, timeoutMs){
   }finally{ clearTimeout(tm) }
 }
 
-/* supabase 直连走 WebView 自带 fetch（Chromium 指纹能过 Cloudflare，无需凭证）；
-   国内反代走原生桥（原生层注入预览凭证 Cookie，绕开浏览器 SameSite 限制）。 */
-function epIsProxy(ep){ return ep.indexOf('edgeone.cool') > -1 }
+/* 所有请求走 WebView 自带 fetch（Chromium 指纹能过运营商 DPI，无需任何反代凭证）。 */
 
 async function req(path, opt){
   opt = opt || {};
   let last;
-  for(const ep of EPS){
+  for(const ep of [baseUrl()]){
     const url = epUrl(ep, path);
     const headers = { 'apikey': ANON, 'Content-Type': 'application/json' };
     if(opt.auth !== false && TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
@@ -195,8 +294,9 @@ async function login(){
   if(s && s.access_token && s.expires_at > Date.now() + 60000){
     TOKEN = s.access_token; UID = s.user_id; return true;
   }
+  const cred = customCred();
   const r = await req('/auth/v1/token?grant_type=password', {
-    method: 'POST', body: { email: EMAIL, password: PWD }, auth: false
+    method: 'POST', body: { email: cred.email, password: cred.pwd }, auth: false
   });
   if(!r || !r.access_token) throw new Error('登录失败');
   TOKEN = r.access_token; UID = r.user.id;
@@ -265,6 +365,7 @@ async function syncAll(silent){
     const p = await push();
     online = true; setNet('on');
     LAST_ERR = null;
+    const _st = S.set(); _st.lastSync = Date.now(); S.saveSet(_st);
     if(!silent) toast('同步完成 · 新增 ' + a + ' 条 · 上传 ' + p + ' 条');
     render();
     return true;
@@ -321,10 +422,19 @@ function render(){
   else if(page === 'settings') v.innerHTML = viewSettings();
   else if(page === 'calendar') v.innerHTML = viewCalendar();
   window.scrollTo(0, 0);
+  setTimeout(fillImgs, 0);
 }
 
 function applyBg(){
-  const c = (S.set().bg) || '';
+  const s = S.set();
+  if(s.bgImg && s.bgImg.indexOf('data:') === 0){
+    document.body.style.backgroundImage = 'url(' + s.bgImg + ')';
+    document.body.style.backgroundSize = 'cover';
+    document.body.style.backgroundPosition = 'center';
+    document.body.style.backgroundRepeat = 'no-repeat';
+    return;
+  }
+  const c = (s.bg) || '';
   document.body.style.background = c || '#FFFFFF';
 }
 
@@ -368,12 +478,19 @@ function viewHome(){
 function txRow(t){
   return '<div class="tx" data-act="edit" data-id="' + t.id + '">' +
     '<div class="tx-dot">' + esc((CATN[t.category] || '?').slice(0, 1)) + '</div>' +
+    (t.imgId ? '<img class="tx-img" data-img="' + t.imgId + '">' : '') +
     '<div class="tx-main">' +
       '<div class="tx-cat">' + esc(CATN[t.category] || t.category) + '</div>' +
       '<div class="tx-note">' + esc(t.note || ymd(t.date)) + '</div>' +
     '</div>' +
     '<div class="tx-amt ' + t.type + '">' + (t.type === 'income' ? '+' : '-') + money(t.amount) + '</div>' +
   '</div>';
+}
+function fillImgs(){
+  document.querySelectorAll('[data-img]').forEach(function(el){
+    const id = el.dataset.img; if(!id || el.src) return;
+    imgComp(id).then(function(u){ if(u) el.src = u; });
+  });
 }
 
 function viewRecords(){
@@ -402,10 +519,17 @@ function viewCalc(){
 
 function viewAI(){
   return '' +
+    '<div class="card" style="background:linear-gradient(135deg,#FFF3F5,#F2FBF6);border:1px solid #F0E6E8">' +
+      '<div class="row between" style="align-items:center">' +
+        '<div><h3 class="card-title" style="margin:0">小账 · AI 聊天助手</h3>' +
+        '<div class="small muted" style="margin-top:2px">像朋友一样问记账、预算、省钱</div></div>' +
+        '<button class="tb-action" data-act="openChat">进入聊天</button>' +
+      '</div>' +
+    '</div>' +
     '<div class="ai-hero">' +
       '<div class="row between"><h3 class="card-title" style="margin:0">AI 拍照记账</h3>' +
       '<button class="tb-action" data-act="capture">选择图片</button></div>' +
-      '<p class="small muted" style="margin:8px 0 0">拍小票、截图或账单，AI 自动识别金额与分类，识别后可手动修改再保存。</p>' +
+      '<p class="small muted" style="margin:8px 0 0">拍小票、截图或账单，AI 自动识别金额与分类，识别后可手动修改再保存。可一次选多张。</p>' +
     '</div>' +
     '<div class="card">' +
       '<h3 class="card-title">AI 财务分析师</h3>' +
@@ -420,27 +544,30 @@ function viewSettings(){
   const s = S.set();
   const tx = S.tx();
   const unsynced = tx.filter(t => !t.synced).length;
+  const cred = customCred();
   return '' +
     '<div class="card">' +
       '<h3 class="card-title">云端备份</h3>' +
-      '<div class="setting-row"><div><div>固定账号自动登录</div>' +
-        '<div class="small muted">18882632073 · 管理员林</div></div>' +
-        '<span class="small ' + (online ? 'muted' : 'muted') + '">' + (online ? '已连接' : '离线') + '</span></div>' +
+      '<div class="setting-row"><div><div>账号：' + esc(cred.email) + '</div>' +
+        '<div class="small muted">昵称：林 · 固定账号自动登录</div></div>' +
+        '<span class="small muted">' + (online ? '已连接云端' : '离线') + '</span></div>' +
       '<div class="setting-row"><div>本地共 ' + tx.length + ' 条' + (unsynced ? '（' + unsynced + ' 条待上传）' : '') + '</div>' +
         '<button class="tb-action" data-act="sync">立即同步</button></div>' +
+      '<div class="setting-row"><div>账号与后台</div><button class="tb-action" data-act="openAccount">账号中心</button></div>' +
       (LAST_ERR ? '<div class="setting-row"><div class="small" style="color:var(--expense)">上次失败 ' + LAST_ERR.time + '<br>' + esc(LAST_ERR.msg) + '</div></div>' : '') +
-      '<div class="setting-row"><div>连不上时先测网络</div>' +
-        '<button class="tb-action" data-act="diag">网络诊断</button></div>' +
-      '<div class="setting-row"><div>联网自动备份</div>' +
-        '<div class="switch ' + (s.auto !== false ? 'on' : '') + '" data-act="toggle" data-id="auto"><i></i></div></div>' +
+      '<div class="setting-row"><div>连不上时先测网络</div><button class="tb-action" data-act="diag">网络诊断</button></div>' +
+      '<div class="setting-row"><div>联网自动备份</div><div class="switch ' + (s.auto !== false ? 'on' : '') + '" data-act="toggle" data-id="auto"><i></i></div></div>' +
     '</div>' +
     '<div class="card">' +
-      '<h3 class="card-title">界面</h3>' +
-      '<div class="setting-row"><div>背景色</div><div class="bg-swatches">' +
-        BGS.map(b => '<button class="swatch ' + ((s.bg || '') === b[0] ? 'on' : '') + '" data-act="bg" data-id="' + b[0] + '" style="background:' + (b[0] || '#fff') + '" title="' + b[1] + '"></button>').join('') +
-      '</div></div>' +
-      '<div class="setting-row"><div>首页励志语</div>' +
-        '<div class="switch ' + (s.quote !== false ? 'on' : '') + '" data-act="toggle" data-id="quote"><i></i></div></div>' +
+      '<h3 class="card-title">同步管理</h3>' +
+      '<div class="setting-row"><div>查看同步状态 / 已同步分类</div><button class="tb-action" data-act="syncManage">查看</button></div>' +
+      '<div class="setting-row"><div>清除云端（保留本地）</div><button class="tb-action" data-act="clearCloud" style="color:var(--expense)">清除</button></div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<h3 class="card-title">界面与背景</h3>' +
+      '<div class="setting-row"><div>自定义背景图</div><button class="tb-action" data-act="openBg">更换</button></div>' +
+      '<div class="setting-row"><div>首页励志语</div><div class="switch ' + (s.quote !== false ? 'on' : '') + '" data-act="toggle" data-id="quote"><i></i></div></div>' +
+      '<div class="setting-row"><div>AI 语音朗读（本地语音）</div><div class="switch ' + (s.tts !== false ? 'on' : '') + '" data-act="toggle" data-id="tts"><i></i></div></div>' +
     '</div>' +
     '<div class="card">' +
       '<h3 class="card-title">数据</h3>' +
@@ -583,6 +710,33 @@ const CALC_FN = {
     return '<div class="result"><div class="big-result"><div class="bv">' + money(fv) + '</div><div class="bk">' + y + ' 年后本息</div></div>' +
       '<div class="r-line"><span>本金</span><b>' + money(p) + '</b></div>' +
       '<div class="r-line"><span>收益</span><b>' + money(fv - p) + '</b></div></div>';
+  },
+  discount(){
+    const o = num('c_discO'), d = num('c_discD');
+    if(!o) return '';
+    const rate = d > 0 && d <= 10 ? d / 10 : d / 100;
+    const price = o * rate;
+    const save = o - price;
+    return '<div class="result"><div class="big-result"><div class="bv">' + money(price) + '</div><div class="bk">到手价</div></div>' +
+      '<div class="r-line"><span>原价</span><b>' + money(o) + '</b></div>' +
+      '<div class="r-line"><span>立省</span><b>' + money(save) + '</b></div></div>';
+  },
+  rise(){
+    const o = num('c_riseO'), n = num('c_riseN');
+    if(!o) return '';
+    const pct = (n - o) / o * 100;
+    const up = pct >= 0;
+    return '<div class="result"><div class="big-result"><div class="bv" style="color:' + (up ? 'var(--expense)' : 'var(--income)') + '">' + (up ? '+' : '') + pct.toFixed(1) + '%</div><div class="bk">' + (up ? '上涨' : '下跌') + '</div></div>' +
+      '<div class="r-line"><span>差额</span><b>' + money(n - o) + '</b></div>' +
+      '<div class="r-line"><span>现在</span><b>' + money(n) + '</b></div></div>';
+  },
+  installment(){
+    const t = num('c_instT'), n = num('c_instN') || 1, r = num('c_instR') / 100;
+    const fee = t * r;
+    const per = (t + fee * n) / n;
+    return '<div class="result"><div class="big-result"><div class="bv">' + money(per) + '</div><div class="bk">每期应还</div></div>' +
+      '<div class="r-line"><span>分期总额</span><b>' + money(per * n) + '</b></div>' +
+      '<div class="r-line"><span>手续费合计</span><b>' + money(fee * n) + '</b></div></div>';
   }
 };
 
@@ -604,7 +758,14 @@ const CALC_FORM = {
        '<div class="field"><label>小费比例（%）</label><input class="input" id="c_tipP" type="number" value="10"></div>',
   invest: '<div class="field"><label>本金（元）</label><input class="input" id="c_invP" type="number" value="50000"></div>' +
           '<div class="field"><label>年利率（%）</label><input class="input" id="c_invR" type="number" step="0.1" value="5"></div>' +
-          '<div class="field"><label>年数</label><input class="input" id="c_invY" type="number" value="10"></div>'
+          '<div class="field"><label>年数</label><input class="input" id="c_invY" type="number" value="10"></div>',
+  discount: '<div class="field"><label>原价（元）</label><input class="input" id="c_discO" type="number" step="0.01" value="199"></div>' +
+            '<div class="field"><label>折扣（折，如 8.5 即 85 折）</label><input class="input" id="c_discD" type="number" step="0.1" value="8.5"></div>',
+  rise: '<div class="field"><label>原来价格（元）</label><input class="input" id="c_riseO" type="number" step="0.01" value="100"></div>' +
+        '<div class="field"><label>现在价格（元）</label><input class="input" id="c_riseN" type="number" step="0.01" value="130"></div>',
+  installment: '<div class="field"><label>总金额（元）</label><input class="input" id="c_instT" type="number" step="0.01" value="6000"></div>' +
+               '<div class="field"><label>分期数（期）</label><input class="input" id="c_instN" type="number" value="12"></div>' +
+               '<div class="field"><label>每期手续费率（%，如 0.6）</label><input class="input" id="c_instR" type="number" step="0.1" value="0.6"></div>'
 };
 
 function openCalc(key){
@@ -620,43 +781,55 @@ function openCalc(key){
 
 /* ================= AI ================= */
 async function doCapture(){
-  let dataUrl = null;
+  let files = [];
   try{
     if(window.Android && window.Android.pickImage){
-      dataUrl = await new Promise((resolve, reject) => {
-        window.__imgResolve = resolve;
-        window.__imgReject = reject;
+      const dataUrl = await new Promise((resolve, reject) => {
+        window.__imgResolve = resolve; window.__imgReject = reject;
         window.Android.pickImage();
         setTimeout(() => { if(window.__imgResolve){ window.__imgResolve = null; reject(new Error('取消')) } }, 120000);
       });
+      if(dataUrl) files = [{ origUrl: dataUrl, compUrl: dataUrl }];
     }else{
-      dataUrl = await new Promise(resolve => {
+      const picked = await new Promise(resolve => {
         const inp = document.createElement('input');
-        inp.type = 'file'; inp.accept = 'image/*';
-        inp.onchange = e => {
-          const f = e.target.files[0]; if(!f) return resolve(null);
-          const r = new FileReader(); r.onload = () => resolve(r.result); r.readAsDataURL(f);
-        };
+        inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
+        inp.onchange = e => resolve(Array.from(e.target.files || []));
         inp.click();
       });
+      for(const f of picked){
+        const c = await compressImage(f, 1600, 0.7);
+        files.push(c);
+        if(files.length >= 6) break;
+      }
     }
-  }catch(e){ dataUrl = null }
-  if(!dataUrl){ toast('未选择图片'); return }
+  }catch(e){}
+  if(!files.length){ toast('未选择图片'); return }
 
-  const sizeKb = Math.round(dataUrl.length * 0.75 / 1024);
-  if(sizeKb > 3500){ toast('图片太大（' + sizeKb + 'KB），请换一张'); return }
-
-  openSheet('AI 识别中', '<div class="preview"><img src="' + dataUrl + '" class="preview"></div><div><span class="spinner"></span>正在识别…</div>');
+  openSheet('AI 识别中', '<div style="padding:16px 0;text-align:center"><span class="spinner"></span> 正在识别 ' + files.length + ' 张图片，请稍候…</div>');
   try{
     await login();
-    const r = await req('/functions/v1/ai-accounting', {
-      method: 'POST', timeout: 90000,
-      body: { mode: 'recognize', image: dataUrl }
+    const results = await Promise.all(files.map(async j => {
+      try{
+        const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 90000, body: { mode: 'recognize', image: j.compUrl } });
+        return (r && r.items) || [];
+      }catch(e){ return [] }
+    }));
+    const items = []; window._aiThumb = {};
+    results.forEach((arr, fi) => {
+      const j = files[fi];
+      arr.forEach(it => {
+        const imgId = uid();
+        imgPut(imgId, { orig: j.origUrl, comp: j.compUrl }); // 原图完整存 IndexedDB，本地永久保留
+        it.imgId = imgId;
+        window._aiThumb[imgId] = j.compUrl;
+        items.push(it);
+      });
     });
-    const items = (r && r.items) || [];
     if(!items.length) throw new Error('没识别出条目，可手动记一笔');
     window._aiItems = items;
-    openSheet('识别结果（可修改）', '<div class="preview"><img src="' + dataUrl + '" class="preview"></div>' +
+    openSheet('识别结果（可修改）',
+      '<p class="small muted" style="margin-bottom:8px">已识别 ' + items.length + ' 笔，可逐条修改后保存。点击图片可查看原图。</p>' +
       items.map((it, i) => aiItemRow(it, i)).join('') +
       '<button class="btn" data-act="saveAll">全部保存（' + items.length + ' 笔）</button>');
   }catch(e){
@@ -671,7 +844,10 @@ function aiItemRow(it, i){
   const catOk = cats.some(c => c[0] === it.category);
   const cat = catOk ? it.category : (type === 'income' ? 'other_inc' : 'other_exp');
   const date = /^\d{4}-\d{2}-\d{2}$/.test(it.date || '') ? it.date : ymd(Date.now());
+  const thumb = (window._aiThumb && window._aiThumb[it.imgId]) ?
+    '<div class="ai-thumb" data-act="viewImg" data-id="' + it.imgId + '"><img src="' + window._aiThumb[it.imgId] + '"></div>' : '';
   return '<div class="card tight" data-ai="' + i + '">' +
+    thumb +
     '<div class="row between" style="margin-bottom:8px">' +
       '<div class="seg" style="width:140px">' +
         '<button data-act="aiType" data-id="' + i + '|expense" class="' + (type === 'expense' ? 'on' : '') + '">支出</button>' +
@@ -703,7 +879,8 @@ function collectAiItems(){
       category: onCat ? onCat.dataset.id.split('|')[1] : 'other_exp',
       amount: parseFloat(amtEl && amtEl.value) || 0,
       note: noteEl ? noteEl.value : '',
-      date: parseDate(dateEl ? dateEl.value : '')
+      date: parseDate(dateEl ? dateEl.value : ''),
+      imgId: it.imgId || null
     });
   });
   return out.filter(x => x.amount > 0);
@@ -749,8 +926,8 @@ async function diagOne(name, ep, path, opt){
 async function runDiag(){
   openSheet('网络诊断中', '<div style="padding:20px 0;text-align:center"><span class="spinner"></span> 正在测试，约 10 秒…</div>');
   const rows = [];
-  rows.push(await diagOne('云端数据接口', EPS[0], '/rest/v1/transactions?select=count', {}));
-  rows.push(await diagOne('云端账号登录', EPS[0], '/auth/v1/token?grant_type=password', { method: 'POST', body: { email: EMAIL, password: PWD }, auth: false }));
+  rows.push(await diagOne('云端数据接口', baseUrl(), '/rest/v1/transactions?select=count', {}));
+  rows.push(await diagOne('云端账号登录', baseUrl(), '/auth/v1/token?grant_type=password', { method: 'POST', body: { email: customCred().email, password: customCred().pwd }, auth: false }));
   const html = rows.map(r =>
     '<div class="card tight" style="margin-bottom:8px">' +
       '<div class="row between"><b style="font-size:14px">' + esc(r.name) + '</b>' +
@@ -761,6 +938,183 @@ async function runDiag(){
     ? '云端已连通，记账会自动备份。'
     : '当前网络连不上云端，不影响记账 —— 数据都存本机，换 WiFi 或联网后会自动同步。';
   openSheet('诊断结果', html + '<p class="small muted" style="margin-top:6px">' + tip + '</p>');
+}
+
+/* ================= 小账聊天（全屏） ================= */
+function openChat(){
+  CHAT.open = true;
+  const ov = document.getElementById('chatOverlay');
+  if(ov) ov.classList.remove('hidden');
+  renderChat();
+  setTimeout(function(){ const i = document.getElementById('chatInput'); if(i) i.focus(); }, 200);
+}
+function closeChat(){
+  CHAT.open = false;
+  const ov = document.getElementById('chatOverlay');
+  if(ov) ov.classList.add('hidden');
+  if(TTS.synth) TTS.synth.cancel();
+}
+function renderChat(){
+  const box = document.getElementById('chatBox');
+  if(!box) return;
+  if(!CHAT.list.length){
+    box.innerHTML = '<div class="chat-welcome">我是小账，你的记账搭子 💬<br>可以问我：这个月花了多少？怎么省钱？帮我算笔账～</div>';
+    return;
+  }
+  box.innerHTML = CHAT.list.map(function(m){
+    return '<div class="chat-msg ' + m.role + '"><div class="bubble">' + mdLite(m.text) + '</div></div>';
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+async function sendChat(){
+  if(CHAT.busy) return;
+  const inp = document.getElementById('chatInput');
+  const text = (inp && inp.value || '').trim();
+  if(!text) return;
+  inp.value = '';
+  chatPush('user', text);
+  renderChat();
+  CHAT.busy = true;
+  const box = document.getElementById('chatBox');
+  const typing = document.createElement('div');
+  typing.className = 'chat-msg assistant';
+  typing.innerHTML = '<div class="bubble"><span class="spinner"></span> 小账正在想…</div>';
+  box.appendChild(typing);
+  box.scrollTop = box.scrollHeight;
+  try{
+    await login();
+    const hist = CHAT.list.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text });
+    const prompt = '你是记账 App「暖记」的 AI 助手“小账”，说话亲切、口语化、懂个人记账和省钱，回答简洁（200 字内）。' +
+      '下面是和用户的对话（最后一句是用户最新问题）：\n' + hist.join('\n');
+    const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'analyze', text: prompt } });
+    const reply = (r && r.text) || '（没收到回复）';
+    chatPush('assistant', reply);
+    if(typing.parentNode) typing.parentNode.removeChild(typing);
+    renderChat();
+    if(TTS.enabled) ttsSpeak(reply);
+  }catch(e){
+    if(typing.parentNode) typing.parentNode.removeChild(typing);
+    chatPush('assistant', '网络开小差了，联网后我再来～');
+    renderChat();
+  }
+  CHAT.busy = false;
+}
+
+/* ================= 图片查看器 ================= */
+async function viewImg(el, id){
+  const url = await imgOrig(id);
+  const ov = document.getElementById('imgOverlay');
+  if(ov){ ov.querySelector('img').src = url || ''; ov.classList.remove('hidden') }
+}
+function closeImg(){ const ov = document.getElementById('imgOverlay'); if(ov) ov.classList.add('hidden') }
+
+/* ================= 背景图（本地生成 / 上传 / 应用） ================= */
+const BG_STYLES = ['薄荷','暖杏','日落','海洋','星空','极光','波点','网格','山影'];
+function genBgPreview(st){
+  const m = { 薄荷:'#EAF8F1',暖杏:'#FFF3E9',日落:'#FFD9C8',海洋:'#CDE7F2',星空:'#E3DEFB',极光:'#E6FBF4',波点:'#F2FBF7',网格:'#F2FBF7',山影:'#EAF8F1' };
+  return 'linear-gradient(135deg,' + (m[st] || '#fff') + ',#ffffff)';
+}
+function genBgCanvas(style){
+  const w = 480, h = 800;
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  const g = function(c1, c2){ const lg = ctx.createLinearGradient(0, 0, 0, h); lg.addColorStop(0, c1); lg.addColorStop(1, c2); return lg };
+  const m = { 薄荷:['#EAF8F1','#FFFFFF'],暖杏:['#FFF3E9','#FFFFFF'],日落:['#FFE3D3','#FFC9B8'],海洋:['#E3F2FB','#CDE7F2'],星空:['#EDEAFB','#F6F3FF'],极光:['#E6FBF4','#E8F0FB'] };
+  if(m[style]){ ctx.fillStyle = g(m[style][0], m[style][1]); ctx.fillRect(0, 0, w, h) }
+  else if(style === '波点'){ ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0,0,w,h); ctx.fillStyle = 'rgba(47,191,143,.12)'; for(let y=20;y<h;y+=46) for(let x=20;x<w;x+=46){ ctx.beginPath(); ctx.arc(x,y,9,0,7); ctx.fill() } }
+  else if(style === '网格'){ ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0,0,w,h); ctx.strokeStyle = 'rgba(47,191,143,.10)'; ctx.lineWidth = 1; for(let x=0;x<=w;x+=30){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke() } for(let y=0;y<=h;y+=30){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke() } }
+  else if(style === '山影'){ ctx.fillStyle = g('#EAF8F1','#FFFFFF'); ctx.fillRect(0,0,w,h); ctx.fillStyle = 'rgba(47,191,143,.18)'; ctx.beginPath(); ctx.moveTo(0,h); ctx.lineTo(0,h-180); ctx.quadraticCurveTo(w/2,h-320,w,h-160); ctx.lineTo(w,h); ctx.closePath(); ctx.fill() }
+  return cv.toDataURL('image/jpeg', 0.7);
+}
+function applyBgImg(url){ const s = S.set(); s.bgImg = url; S.saveSet(s); applyBg() }
+function openBgPicker(){
+  const gen = BG_STYLES.map(function(st){
+    return '<button class="bg-gen" data-act="bgGen" data-id="' + st + '"><div class="bg-gen-ic" style="background:' + genBgPreview(st) + '"></div><span>' + st + '</span></button>';
+  }).join('');
+  const s = S.set();
+  openSheet('自定义背景', '' +
+    '<p class="small muted">AI 生成 / 上传本地 / 纯色都能用。背景只存本机，不影响记账。</p>' +
+    '<h3 class="card-title" style="margin:12px 0 8px">AI 生成背景（免费·即时）</h3>' +
+    '<div class="bg-gen-grid">' + gen + '</div>' +
+    (s.bgImg && s.bgImg.indexOf('data:') === 0 ? '<button class="btn ghost" data-act="bgClear" style="margin-top:12px">清除自定义图片背景</button>' : '') +
+    '<h3 class="card-title" style="margin:14px 0 8px">上传本地图片</h3>' +
+    '<button class="btn ghost" data-act="bgUpload">从相册选择</button>' +
+    '<h3 class="card-title" style="margin:14px 0 8px">纯色</h3>' +
+    '<div class="bg-swatches">' + BGS.map(function(b){ return '<button class="swatch ' + ((s.bg || '') === b[0] ? 'on' : '') + '" data-act="bg" data-id="' + b[0] + '" style="background:' + (b[0] || '#fff') + '"></button>'; }).join('') + '</div>');
+}
+function bgGen(el, id){ applyBgImg(genBgCanvas(id)); toast('已应用「' + id + '」背景'); closeSheet() }
+async function bgUpload(){
+  const f = await new Promise(function(res){ const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.onchange = function(e){ res(e.target.files[0]) }; i.click(); });
+  if(!f) return;
+  const c = await compressImage(f, 1000, 0.6);
+  applyBgImg(c.compUrl); toast('已应用上传的背景'); closeSheet();
+}
+function bgClear(){ const s = S.set(); s.bgImg = ''; S.saveSet(s); applyBg(); closeSheet(); }
+
+/* ================= 账号中心 ================= */
+function openAccount(){
+  const s = S.set();
+  const cred = customCred();
+  openSheet('账号中心', '' +
+    '<div class="card tight" style="margin-bottom:12px">' +
+      '<div class="row between"><div><div style="font-weight:600">' + esc(cred.email) + '</div>' +
+      '<div class="small muted">昵称：林 · 固定账号自动登录</div></div>' +
+      '<span class="small muted">' + (online ? '已连接云端' : '离线') + '</span></div>' +
+    '</div>' +
+    '<div class="field"><label>切换 / 自定义账号（可选）</label>' +
+      '<input class="input" id="accEmail" value="' + esc(s.accEmail || '') + '" placeholder="邮箱，不填则用默认账号"></div>' +
+    '<div class="field"><label>密码</label><input class="input" id="accPwd" type="password" value="' + esc(s.accPwd || '') + '" placeholder="留空表示不修改"></div>' +
+    '<div class="field"><label>自定义后台地址（可选）</label><input class="input" id="accSb" value="' + esc(s.sbUrl || '') + '" placeholder="https://xxxx.supabase.co"></div>' +
+    '<button class="btn" data-act="saveAccount">保存并重新登录</button>' +
+    '<button class="btn ghost" data-act="logoutAccount" style="margin-top:10px">退出当前账号（用默认）</button>' +
+    '<p class="small muted" style="margin-top:10px">默认账号已自动登录并云端备份。填入自己的 Supabase 项目可切换到个人后台；留空则回到默认账号。</p>');
+}
+function saveAccount(){
+  const s = S.set();
+  s.accEmail = (document.getElementById('accEmail').value || '').trim();
+  s.accPwd = document.getElementById('accPwd').value;
+  s.sbUrl = (document.getElementById('accSb').value || '').trim();
+  S.saveSet(s); S.saveSes(null); TOKEN = ''; UID = '';
+  closeSheet(); render();
+  toast('已保存，正在重新登录…');
+  syncAll(false);
+}
+function logoutAccount(){
+  const s = S.set(); s.accEmail = ''; s.accPwd = ''; s.sbUrl = ''; S.saveSet(s);
+  S.saveSes(null); TOKEN = ''; UID = '';
+  closeSheet(); render(); toast('已退出，使用默认账号'); syncAll(false);
+}
+
+/* ================= 同步管理 ================= */
+async function syncManage(){
+  const tx = S.tx();
+  const synced = tx.filter(function(t){ return t.synced }).length;
+  const catCount = {};
+  tx.filter(function(t){ return t.synced }).forEach(function(t){ const n = CATN[t.category] || t.category; catCount[n] = (catCount[n] || 0) + 1 });
+  const cats = Object.keys(catCount).map(function(k){ return k + ' ' + catCount[k] + '笔' }).join('、') || '暂无';
+  const s = S.set();
+  const last = s.lastSync ? new Date(s.lastSync).toLocaleString('zh-CN', { hour12: false }) : '从未';
+  openSheet('同步管理', '' +
+    '<div class="card tight" style="margin-bottom:12px">' +
+      '<div class="setting-row"><div>本地账单</div><b>' + tx.length + ' 条</b></div>' +
+      '<div class="setting-row"><div>已同步到云端</div><b style="color:var(--income)">' + synced + ' 条</b></div>' +
+      '<div class="setting-row"><div>待上传</div><b style="color:var(--expense)">' + (tx.length - synced) + ' 条</b></div>' +
+      '<div class="setting-row"><div>上次同步</div><span class="small muted">' + last + '</span></div>' +
+    '</div>' +
+    '<div class="card tight" style="margin-bottom:12px"><div class="card-title" style="margin-bottom:6px">已同步分类</div><div class="small muted">' + cats + '</div></div>' +
+    '<p class="small muted">后台消耗请在 Supabase 项目面板查看（本机不显示）。验证同步：清空本地后点「立即同步」能找回云端数据即生效。</p>' +
+    '<button class="btn danger" data-act="clearCloud" style="margin-top:6px">清除云端数据（保留本地）</button>');
+}
+async function clearCloud(){
+  if(!confirm('确定清除云端所有账单？本地数据会保留。此操作不可撤销，且需要云端可写权限。')) return;
+  try{
+    await login();
+    await req('/rest/v1/transactions?user_id=eq.' + UID, { method: 'DELETE', headers: { 'Prefer': 'return=minimal' } });
+    const tx = S.tx(); tx.forEach(function(t){ t.synced = false }); S.saveTx(tx);
+    closeSheet(); toast('云端数据已清除（本地保留）'); render();
+  }catch(e){
+    openSheet('清除失败', '<p class="small muted">' + esc(e.message || String(e)) + '</p><p class="small muted">多半是云端权限（RLS）未开放，不影响本地数据。</p>');
+  }
 }
 
 /* ================= 动作 ================= */
@@ -837,6 +1191,7 @@ const ACTIONS = {
     const s = S.set();
     if(id === 'auto') s.auto = !(s.auto !== false);
     if(id === 'quote') s.quote = !(s.quote !== false);
+    if(id === 'tts'){ s.tts = !(s.tts !== false); TTS.enabled = s.tts; S.saveSet(s); render(); if(TTS.enabled) ttsSpeak('朗读已开启'); return; }
     S.saveSet(s); render();
   },
   bg(el, id){
@@ -860,7 +1215,21 @@ const ACTIONS = {
     const tx = S.tx();
     tx.forEach(t => { if(t.remote_id){ const d = S.del(); if(d.indexOf(t.remote_id) < 0){ d.push(t.remote_id); S.saveDel(d) } } });
     S.saveTx([]); render(); toast('已清空本地');
-  }
+  },
+  openChat(){ openChat() },
+  closeChat(){ closeChat() },
+  sendChat(){ sendChat() },
+  viewImg(el, id){ viewImg(el, id) },
+  closeImg(){ closeImg() },
+  openBg(){ openBgPicker() },
+  bgGen(el, id){ bgGen(el, id) },
+  bgUpload(){ bgUpload() },
+  bgClear(){ bgClear() },
+  openAccount(){ openAccount() },
+  saveAccount(){ saveAccount() },
+  logoutAccount(){ logoutAccount() },
+  syncManage(){ syncManage() },
+  clearCloud(){ clearCloud() }
 };
 
 document.addEventListener('click', function(e){
@@ -897,12 +1266,20 @@ window.onImageCancel = function(){
 
 /* ================= 启动 ================= */
 function init(){
-  const s = S.ses();
-  if(s){ TOKEN = s.access_token || ''; UID = s.user_id || '' }
+  ttsInit();
+  const s = S.set();
+  TTS.enabled = (s.tts !== false);
+  const ses = S.ses();
+  if(ses){ TOKEN = ses.access_token || ''; UID = ses.user_id || '' }
   render();
   setNet('off');
-  if((S.set().auto !== false)) syncAll(true);
+  if((s.auto !== false)) syncAll(true);
   window.addEventListener('online', () => syncAll(true));
-  setInterval(function(){ if(S.set().auto !== false) syncAll(true) }, 120000);
+  setInterval(function(){ if((S.set().auto !== false)) syncAll(true) }, 120000);
 }
 init();
+
+(function(){
+  const ci = document.getElementById('chatInput');
+  if(ci) ci.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); sendChat() } });
+})();
