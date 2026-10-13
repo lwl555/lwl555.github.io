@@ -106,6 +106,19 @@ async function compressImage(file, maxSide, quality){
   const compUrl = cv.toDataURL('image/jpeg', quality || 0.6);
   return { origUrl: origUrl, compUrl: compUrl };
 }
+/* 把已存在的 dataURL 重新压缩成小体积 JPEG（用于 Agnes 生图等：原图 1024×1024 太大，
+   直接存 localStorage 会撑爆 5MB 配额）。压缩失败则原样返回，不阻断主流程。 */
+async function compressDataUrl(url, maxSide, quality){
+  try{
+    const img = await new Promise(function(res, rej){ const im = new Image(); im.onload = function(){ res(im) }; im.onerror = rej; im.src = url });
+    if(!img.width || !img.height) return url;
+    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(img, 0, 0, w, h);
+    return cv.toDataURL('image/jpeg', quality || 0.6);
+  }catch(e){ return url }
+}
 
 /* ================= 本地 TTS（Web Speech API，系统中文语音，离线可用） ================= */
 const TTS = { synth: window.speechSynthesis, voice: null, enabled: false };
@@ -1161,7 +1174,7 @@ async function bgGenAgnes(prompt, style, doClose){
   try{
     await login();
     const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:120000, body:{ mode:'image', prompt:(prompt || '温暖清新的记账 App 背景') + (style ? ('，风格：' + style) : ''), size:'1024x1024' } });
-    if(r && r.image){ applyBgImg(r.image); toast('已用 Agnes 生成背景'); if(doClose) closeSheet(); return }
+    if(r && r.image){ applyBgImg(await compressDataUrl(r.image, 800, 0.65)); toast('已用 Agnes 生成背景'); if(doClose) closeSheet(); return }
     throw new Error('未返回图片');
   }catch(e){
     const st = style || BG_STYLES[Math.floor(Math.random()*BG_STYLES.length)];
@@ -1660,6 +1673,10 @@ window.onImagesDone = function(count){
 function init(){
   ttsInit();
   const s = S.set();
+  // 兼容旧版：曾用 Agnes 1024×1024 原图存 bgImg，体积过大会撑爆 localStorage 5MB 配额，启动时压缩一次
+  if(s.bgImg && s.bgImg.indexOf('data:') === 0 && s.bgImg.length > 1600000){
+    compressDataUrl(s.bgImg, 800, 0.65).then(function(u){ if(u && u !== s.bgImg){ const ns = S.set(); ns.bgImg = u; S.saveSet(ns); } });
+  }
   TTS.enabled = (s.tts !== false);
   const ses = S.ses();
   if(ses){ TOKEN = ses.access_token || ''; UID = ses.user_id || '' }
