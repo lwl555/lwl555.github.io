@@ -233,3 +233,39 @@ textarea.input{min-height:64px;resize:vertical}
 .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#C9D2D5;margin-right:5px}
 .status-dot.on{background:var(--brand)}
 .status-dot.off{background:#E0A03F}
+
+/* ---------- 全屏聊天（小账） ---------- */
+.chat-overlay{position:fixed;inset:0;z-index:90;background:#fff;display:flex;flex-direction:column}
+.chat-overlay.hidden{display:none}
+.chat-head{display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#FFF3F5,#F2FBF6)}
+.chat-title{font-size:17px;font-weight:600}
+.chat-close{color:var(--brand-dark);font-size:14px}
+.chat-box{flex:1;overflow-y:auto;padding:16px;background:#FAFBFB}
+.chat-welcome{text-align:center;color:var(--muted);font-size:14px;padding:40px 20px;line-height:1.8}
+.chat-msg{display:flex;margin-bottom:14px}
+.chat-msg.user{justify-content:flex-end}
+.chat-msg .bubble{max-width:78%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.6;white-space:normal}
+.chat-msg.assistant .bubble{background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px}
+.chat-msg.user .bubble{background:var(--brand);color:#fff;border-bottom-right-radius:4px}
+.chat-input-row{display:flex;gap:10px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:#fff}
+.chat-input{flex:1;border:1px solid var(--line);border-radius:999px;padding:10px 16px;background:#fff}
+.chat-input:focus{outline:none;border-color:var(--brand)}
+.chat-send{background:var(--brand);color:#fff;border-radius:999px;padding:0 20px;font-size:15px;font-weight:500}
+.chat-send:active{background:var(--brand-dark)}
+
+/* ---------- 图片查看器 ---------- */
+.img-overlay{position:fixed;inset:0;z-index:95;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:20px}
+.img-overlay.hidden{display:none}
+.img-overlay img{max-width:100%;max-height:80%;border-radius:8px}
+.img-close{position:absolute;top:calc(env(safe-area-inset-top) + 14px);right:16px;color:#fff;font-size:15px;background:rgba(255,255,255,.15);border-radius:999px;padding:6px 16px}
+
+/* ---------- 背景生成 ---------- */
+.bg-gen-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.bg-gen{display:flex;flex-direction:column;align-items:center;gap:6px}
+.bg-gen-ic{width:100%;aspect-ratio:3/4;border-radius:10px;border:1px solid var(--line)}
+.bg-gen span{font-size:12px;color:var(--text)}
+
+/* ---------- 账单图片缩略 ---------- */
+.tx-img{width:38px;height:38px;border-radius:9px;object-fit:cover;flex:0 0 auto;margin-right:-4px;border:1px solid var(--line)}
+.ai-thumb{border-radius:10px;overflow:hidden;margin-bottom:8px;cursor:pointer}
+.ai-thumb img{width:100%;display:block;max-height:160px;object-fit:cover}
