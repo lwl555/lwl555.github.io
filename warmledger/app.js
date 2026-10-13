@@ -940,6 +940,95 @@ async function runDiag(){
   openSheet('诊断结果', html + '<p class="small muted" style="margin-top:6px">' + tip + '</p>');
 }
 
+/* ================= 小账工具调用（自动化） ================= */
+/* 从助手回复里抽取 {@tool,@args} 工具块（支持 ```json 包裹或裸 JSON） */
+function extractTool(text){
+  if(!text) return null;
+  const m = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  let raw = m ? m[1] : null;
+  if(!raw){ const m2 = text.match(/\{[^{}]*"tool"\s*:[^{}]*\}/); raw = m2 ? m2[0] : null; }
+  if(!raw) return null;
+  try{ const o = JSON.parse(raw); if(o && o.tool) return o; }catch(e){}
+  return null;
+}
+function runCalcReply(a){
+  a = a || {}; const k = a.kind;
+  if(k === 'discount'){
+    const o = Number(a.orig)||0, d = Number(a.discount)||0;
+    if(!o || !d) return '请告诉我原价和折扣（比如 8.5 折）';
+    const rate = (d > 0 && d <= 10) ? d/10 : d/100;
+    const price = o*rate, save = o-price;
+    return '💡 ' + money(o) + ' 元打 ' + d + ' 折 = ' + money(price) + ' 元，立省 ' + money(save) + ' 元';
+  }
+  if(k === 'rise'){
+    const o = Number(a.old)||0, n = Number(a.now)||0;
+    if(!o) return '请告诉我原价和现价';
+    const pct = (n-o)/o*100, up = pct >= 0;
+    return '📈 ' + (up ? '上涨' : '下跌') + ' ' + Math.abs(pct).toFixed(1) + '%：' + money(o) + ' → ' + money(n) + ' 元（差 ' + money(n-o) + '）';
+  }
+  if(k === 'installment'){
+    const t = Number(a.total)||0, p = Number(a.periods)||1, r = Number(a.rate)||0;
+    if(!t) return '请告诉我总额、期数和每期手续费率';
+    const fee = t*r/100, per = (t + fee*p)/p;
+    return '💳 分期 ' + p + ' 期：每期 ' + money(per) + ' 元，总额 ' + money(per*p) + ' 元，手续费合计 ' + money(fee*p) + ' 元';
+  }
+  return '🧮 这种计算我还没学会，去「计算器」里点一下吧～';
+}
+function queryReply(a){
+  a = a || {}; const k = a.kind;
+  const tx = S.tx();
+  if(k === 'month_exp' || k === 'month_inc' || k === 'balance'){
+    const st = monthStats(Date.now());
+    if(k === 'month_exp') return '📊 本月（' + st.key + '）支出共 ' + money(st.exp) + ' 元';
+    if(k === 'month_inc') return '📊 本月（' + st.key + '）收入共 ' + money(st.inc) + ' 元';
+    return '📊 本月（' + st.key + '）结余 ' + money(st.bal) + ' 元（收 ' + money(st.inc) + ' / 支 ' + money(st.exp) + '）';
+  }
+  if(k === 'today_exp'){
+    let e = 0; tx.forEach(t => { if(ymd(t.date) === ymd(Date.now()) && t.type === 'expense') e += t.amount });
+    return '📊 今天支出 ' + money(e) + ' 元';
+  }
+  if(k === 'top_cat'){
+    const key = ymKey(Date.now()); const byCat = {};
+    tx.forEach(t => { if(t.type === 'expense' && ymKey(t.date) === key){ const n = CATN[t.category]||t.category; byCat[n] = (byCat[n]||0)+t.amount } });
+    const entries = Object.entries(byCat).sort((x,y) => y[1]-x[1]);
+    if(!entries.length) return '📊 本月还没有支出记录';
+    return '📊 本月支出最多的分类是「' + entries[0][0] + '」' + money(entries[0][1]) + ' 元' + (entries[1] ? '，其次是「' + entries[1][0] + '」' + money(entries[1][1]) + ' 元' : '');
+  }
+  return '📊 这项我暂时查不了，去「账单」页看看吧～';
+}
+function execTool(tool, args){
+  args = args || {};
+  if(tool === 'add_tx'){
+    const type = args.type === 'income' ? 'income' : 'expense';
+    const amount = Number(args.amount) || 0;
+    if(!amount || amount <= 0) return '⚠️ 金额无效，没记下';
+    let cat = args.category; const cats = CATS[type];
+    if(!cats.some(c => c[0] === cat)) cat = type === 'income' ? 'other_inc' : 'other_exp';
+    const data = { type, amount, category: cat, note: (args.note || ''), date: parseDate(args.date) };
+    addTx(data);
+    return '✅ 已记一笔：' + (type === 'income' ? '收入' : '支出') + ' · ' + CATN[cat] + ' ' + money(amount) + ' 元' + (data.note ? '（' + data.note + '）' : '');
+  }
+  if(tool === 'calc') return runCalcReply(args);
+  if(tool === 'query') return queryReply(args);
+  if(tool === 'gen_bg'){ bgGenAgnes(args.prompt || '', args.style || '', false); return '🎨 正在用 Agnes 生成背景，稍等…'; }
+  return '🤖 收到指令：' + tool + '（暂不支持）';
+}
+/* Agnes AI 生图：调后端 image 模式返回 dataURL；后端未部署时回退本地生成 */
+async function bgGenAgnes(prompt, style, doClose){
+  toast('Agnes 正在生图…');
+  try{
+    await login();
+    const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:120000, body:{ mode:'image', prompt:(prompt || '温暖清新的记账 App 背景') + (style ? ('，风格：' + style) : ''), size:'1024x1024' } });
+    if(r && r.image){ applyBgImg(r.image); toast('已用 Agnes 生成背景'); if(doClose) closeSheet(); return }
+    throw new Error('未返回图片');
+  }catch(e){
+    const st = style || BG_STYLES[Math.floor(Math.random()*BG_STYLES.length)];
+    applyBgImg(genBgCanvas(st));
+    toast('（本地生成，部署 Agnes 后端后可真·AI 生图）');
+    if(doClose) closeSheet();
+  }
+}
+
 /* ================= 小账聊天（全屏） ================= */
 function openChat(){
   CHAT.open = true;
@@ -983,15 +1072,33 @@ async function sendChat(){
   box.scrollTop = box.scrollHeight;
   try{
     await login();
-    const hist = CHAT.list.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text });
-    const prompt = '你是记账 App「暖记」的 AI 助手“小账”，说话亲切、口语化、懂个人记账和省钱，回答简洁（200 字内）。' +
-      '下面是和用户的对话（最后一句是用户最新问题）：\n' + hist.join('\n');
-    const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'analyze', text: prompt } });
-    const reply = (r && r.text) || '（没收到回复）';
-    chatPush('assistant', reply);
+    const hist = CHAT.list.slice(0, -1).map(function(m){ return { role: m.role, text: m.text } });
+    const text = CHAT.list[CHAT.list.length - 1].text;
+    let r, reply;
+    try{
+      r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'agent', text: text, history: hist } });
+      if(r && r.text) reply = r.text;
+    }catch(e){ /* agent 模式未部署，下面走 analyze 兜底 */ }
+    if(!reply){
+      const prompt = '你是记账 App「暖记」的 AI 助手“小账”。若用户要你执行操作（记账/计算/查账/生成背景），只输出一个 ```json 工具块 ```（{"tool":"add_tx|calc|query|gen_bg","args":{...}}），不要其它文字；其它情况用自然语言简洁回答。' +
+        '分类id：餐饮food/外卖takeout/交通transport/加油fuel/购物shopping/居家home/房租rent/水电燃气utility/数码digital/通讯comm/娱乐fun/旅行travel/美容beauty/医疗medical/宠物pet/教育edu/运动sport/咖啡coffee/菜场超市market/人情social/保险insurance/订阅会员subscription/税费tax_fee/其他other_exp / 工资salary/奖金bonus/理财收益invest/兼职parttime/红包redpacket_in/分红dividend/退款refund/租金收入rental_in/零花钱allowance/其他收入other_inc。' +
+        'calc 参数：discount{orig:原价,discount:折扣如8.5表85折} rise{old:原价,now:现价} installment{total:总额,periods:期数,rate:每期手续费率%}。query 参数：month_exp|month_inc|balance|today_exp|top_cat。金额自动转阿拉伯数字，直接执行不要反问。' +
+        '对话历史：\n' + hist.map(function(m){ return (m.role === 'user' ? '用户' : '小账') + '：' + m.text }).join('\n') + '\n用户：' + text;
+      r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'analyze', text: prompt } });
+      reply = (r && r.text) || '（没收到回复）';
+    }
+    const tool = extractTool(reply);
     if(typing.parentNode) typing.parentNode.removeChild(typing);
-    renderChat();
-    if(TTS.enabled) ttsSpeak(reply);
+    if(tool){
+      const resText = execTool(tool.tool, tool.args);
+      chatPush('assistant', resText);
+      renderChat();
+      ttsSpeak(resText);
+    } else {
+      chatPush('assistant', reply);
+      renderChat();
+      if(TTS.enabled) ttsSpeak(reply);
+    }
   }catch(e){
     if(typing.parentNode) typing.parentNode.removeChild(typing);
     chatPush('assistant', '网络开小差了，联网后我再来～');
@@ -1033,8 +1140,16 @@ function openBgPicker(){
   }).join('');
   const s = S.set();
   openSheet('自定义背景', '' +
-    '<p class="small muted">AI 生成 / 上传本地 / 纯色都能用。背景只存本机，不影响记账。</p>' +
-    '<h3 class="card-title" style="margin:12px 0 8px">AI 生成背景（免费·即时）</h3>' +
+    '<p class="small muted">AI 生图 / 本地生成 / 上传 / 纯色都能用。背景只存本机，不影响记账。</p>' +
+    '<h3 class="card-title" style="margin:12px 0 8px">AI 生图（Agnes 模型）</h3>' +
+    '<div class="field"><label>描述你想要的背景（如：清晨阳光下的咖啡桌）</label>' +
+      '<input class="input" id="bgPrompt" placeholder="一句话描述"></div>' +
+    '<div class="chips" id="bgStyles" style="margin-bottom:8px">' +
+      BG_STYLES.map(function(st){ return '<button class="chip-cat bg-style" data-act="bgStyle" data-id="' + st + '">' + st + '</button>'; }).join('') +
+    '</div>' +
+    '<button class="btn" data-act="bgAgnes">用 Agnes 生成</button>' +
+    '<p class="small muted" style="margin-top:6px">需部署后端 image 模式；未部署会自动用本地风格生成。</p>' +
+    '<h3 class="card-title" style="margin:14px 0 8px">本地风格（免费·即时）</h3>' +
     '<div class="bg-gen-grid">' + gen + '</div>' +
     (s.bgImg && s.bgImg.indexOf('data:') === 0 ? '<button class="btn ghost" data-act="bgClear" style="margin-top:12px">清除自定义图片背景</button>' : '') +
     '<h3 class="card-title" style="margin:14px 0 8px">上传本地图片</h3>' +
@@ -1225,6 +1340,15 @@ const ACTIONS = {
   bgGen(el, id){ bgGen(el, id) },
   bgUpload(){ bgUpload() },
   bgClear(){ bgClear() },
+  bgStyle(el, id){
+    const box = document.getElementById('bgStyles');
+    if(box) box.querySelectorAll('.bg-style').forEach(b => b.classList.toggle('on', b.dataset.id === id));
+  },
+  bgAgnes(){
+    const p = (document.getElementById('bgPrompt') || {}).value || '';
+    const sel = document.querySelector('#bgStyles .bg-style.on');
+    bgGenAgnes(p, sel ? sel.dataset.id : '', true);
+  },
   openAccount(){ openAccount() },
   saveAccount(){ saveAccount() },
   logoutAccount(){ logoutAccount() },
