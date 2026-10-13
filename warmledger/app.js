@@ -780,45 +780,104 @@ function openCalc(key){
 }
 
 /* ================= AI ================= */
+function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms) }) }
+
+/* 旧 APK（无 pickImages 桥）：逐张添加，支持不限量，无需重装 App */
+function pickOneAndroid(){
+  return new Promise(function(resolve, reject){
+    window.__imgResolve = resolve; window.__imgReject = reject;
+    try{ window.Android.pickImage() }catch(e){ if(window.__imgReject){ window.__imgReject = null } reject(e) }
+    setTimeout(function(){ if(window.__imgResolve){ window.__imgResolve = null; resolve(null) } }, 120000);
+  }).catch(function(){ return null });
+}
+function pickLoopAndroid(){
+  return new Promise(function(resolve){
+    const acc = [];
+    function render(){
+      openSheet('已选 ' + acc.length + ' 张图片',
+        (acc.length ? '<div class="ai-thumbs">' + acc.map(function(_, i){ return '<div class="ai-thumb"><img src="' + acc[i].compUrl + '"></div>' }).join('') + '</div>' : '<p class="small muted">还没有选图，点下面按钮从相册/相机添加。</p>') +
+        '<button class="btn" data-act="imgAddMore">+ 继续添加图片</button>' +
+        '<button class="btn ghost" data-act="imgStartRec"' + (acc.length ? '' : ' disabled') + '>开始识别（' + acc.length + ' 张）</button>');
+    }
+    window.__loopAdd = function(){ pickOneAndroid().then(function(d){ if(d) acc.push({ origUrl: d, compUrl: d }); render(); }) };
+    window.__loopDone = function(){ const r = acc.slice(); window.__loopAdd = null; window.__loopDone = null; resolve(r); };
+    render();
+  });
+}
+
 async function doCapture(){
   let files = [];
   try{
-    if(window.Android && window.Android.pickImage){
-      const dataUrl = await new Promise((resolve, reject) => {
-        window.__imgResolve = resolve; window.__imgReject = reject;
-        window.Android.pickImage();
-        setTimeout(() => { if(window.__imgResolve){ window.__imgResolve = null; reject(new Error('取消')) } }, 120000);
-      });
-      if(dataUrl) files = [{ origUrl: dataUrl, compUrl: dataUrl }];
-    }else{
-      const picked = await new Promise(resolve => {
+    if(window.Android && typeof window.Android.pickImages === 'function'){
+      // 新 APK：系统原生多选（一次选很多张）
+      window.__imgMulti = [];
+      files = await new Promise(function(res){ window.__imgDone = res; window.Android.pickImages(); });
+      window.__imgMulti = null;
+    } else if(window.Android && window.Android.pickImage){
+      // 旧 APK：逐张添加，不限量（不用重装 App）
+      files = await pickLoopAndroid();
+    } else {
+      // 网站/浏览器：多文件选择，不限量
+      const picked = await new Promise(function(resolve){
         const inp = document.createElement('input');
         inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true;
-        inp.onchange = e => resolve(Array.from(e.target.files || []));
+        inp.onchange = function(e){ resolve(Array.from(e.target.files || [])) };
         inp.click();
       });
       for(const f of picked){
         const c = await compressImage(f, 1600, 0.7);
         files.push(c);
-        if(files.length >= 6) break;
       }
     }
   }catch(e){}
-  if(!files.length){ toast('未选择图片'); return }
+  await processImages(files);
+}
 
-  openSheet('AI 识别中', '<div style="padding:16px 0;text-align:center"><span class="spinner"></span> 正在识别 ' + files.length + ' 张图片，请稍候…</div>');
+/* 识别队列：有限并发（超出自动排队），单张失败/限流自动退避重试 */
+async function recognizeOne(j, attempt){
+  attempt = attempt || 0;
+  try{
+    const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 90000, body: { mode: 'recognize', image: j.compUrl } });
+    return r;
+  }catch(e){
+    if(attempt < 3){ await sleep(700 * Math.pow(2, attempt)); return recognizeOne(j, attempt + 1) }
+    return null;
+  }
+}
+async function runRecognizeQueue(files){
+  const CONC = 3;                          // 同时处理的图片数，超出排队
+  const out = new Array(files.length).fill(null);
+  let idx = 0, done = 0;
+  const stat = function(){
+    const el = document.getElementById('recStat');
+    if(el) el.textContent = '正在识别 ' + done + ' / ' + files.length + ' 张（并发 ' + Math.min(CONC, files.length) + '）…';
+  };
+  stat();
+  async function worker(){
+    while(idx < files.length){
+      const my = idx++;
+      try{ const r = await recognizeOne(files[my]); out[my] = (r && r.items) || []; }
+      catch(e){ out[my] = [] }
+      done++; stat();
+    }
+  }
+  const ws = [];
+  const n = Math.min(CONC, files.length);
+  for(let i = 0; i < n; i++) ws.push(worker());
+  await Promise.all(ws);
+  return out;
+}
+
+async function processImages(files){
+  if(!files || !files.length){ toast('未选择图片'); return }
+  openSheet('AI 识别中', '<div style="padding:16px 0;text-align:center"><span class="spinner"></span><br><span id="recStat">准备识别 ' + files.length + ' 张…</span></div>');
   try{
     await login();
-    const results = await Promise.all(files.map(async j => {
-      try{
-        const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 90000, body: { mode: 'recognize', image: j.compUrl } });
-        return (r && r.items) || [];
-      }catch(e){ return [] }
-    }));
+    const results = await runRecognizeQueue(files);
     const items = []; window._aiThumb = {};
-    results.forEach((arr, fi) => {
+    results.forEach(function(arr, fi){
       const j = files[fi];
-      arr.forEach(it => {
+      (arr || []).forEach(function(it){
         const imgId = uid();
         imgPut(imgId, { orig: j.origUrl, comp: j.compUrl }); // 原图完整存 IndexedDB，本地永久保留
         it.imgId = imgId;
@@ -830,7 +889,7 @@ async function doCapture(){
     window._aiItems = items;
     openSheet('识别结果（可修改）',
       '<p class="small muted" style="margin-bottom:8px">已识别 ' + items.length + ' 笔，可逐条修改后保存。点击图片可查看原图。</p>' +
-      items.map((it, i) => aiItemRow(it, i)).join('') +
+      items.map(function(it, i){ return aiItemRow(it, i) }).join('') +
       '<button class="btn" data-act="saveAll">全部保存（' + items.length + ' 笔）</button>');
   }catch(e){
     openSheet('识别失败', '<p class="small muted">' + esc(e.message || String(e)) + '</p>' +
@@ -1274,6 +1333,8 @@ const ACTIONS = {
   },
   calc(el, id){ openCalc(id) },
   capture(){ doCapture() },
+  imgAddMore(){ if(window.__loopAdd) window.__loopAdd() },
+  imgStartRec(){ if(window.__loopDone) window.__loopDone() },
   analyst(){ page = 'ai'; render(); setTimeout(doAnalyze, 120) },
   analyze(){ doAnalyze() },
   aiType(el, id){
@@ -1382,10 +1443,21 @@ document.getElementById('sheetClose').addEventListener('click', closeSheet);
 
 /* 供安卓端回调：图片选择结果（data URL） */
 window.onImagePicked = function(dataUrl){
+  if(window.__imgMulti){                 // 多选收集模式：先入队
+    if(dataUrl) window.__imgMulti.push({ origUrl: dataUrl, compUrl: dataUrl });
+    return;
+  }
   if(window.__imgResolve){ const r = window.__imgResolve; window.__imgResolve = null; r(dataUrl) }
 };
 window.onImageCancel = function(){
+  if(window.__imgMulti) return;          // 多选模式下取消忽略，最终以 onImagesDone 收尾
   if(window.__imgResolve){ const r = window.__imgResolve; window.__imgResolve = null; r(null) }
+};
+/* 原生多选结束信号：把收集到的图片数组交给调用方 */
+window.onImagesDone = function(count){
+  const arr = window.__imgMulti || [];
+  window.__imgMulti = null;
+  if(window.__imgDone){ const r = window.__imgDone; window.__imgDone = null; r(arr) }
 };
 
 /* ================= 启动 ================= */
