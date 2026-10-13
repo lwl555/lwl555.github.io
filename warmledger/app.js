@@ -282,6 +282,7 @@ async function req(path, opt){
       try{ return JSON.parse(out.body) }catch(e){ return out.body }
     }
     last = new Error(friendlyNetErr(out));
+    last.code = out ? out.code : 0;
   }
   throw last || new Error('网络不可用');
 }
@@ -872,7 +873,7 @@ async function doCapture(){
         inp.click();
       });
       for(const f of picked){
-        const c = await compressImage(f, 1600, 0.7);
+        const c = await compressImage(f, 1280, 0.6);
         files.push(c);
       }
     }
@@ -880,39 +881,37 @@ async function doCapture(){
   await processImages(files);
 }
 
-/* 识别队列：有限并发（超出自动排队），单张失败/限流自动退避重试 */
+/* 识别单张：失败自动重试；命中 429 限流时按接近冷却时长长退避（免费档冷却约 1 分钟） */
 async function recognizeOne(j, attempt){
   attempt = attempt || 0;
   try{
     const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 90000, body: { mode: 'recognize', image: j.compUrl } });
     return r;
   }catch(e){
-    if(attempt < 3){ await sleep(700 * Math.pow(2, attempt)); return recognizeOne(j, attempt + 1) }
+    const code = e.code || 0;
+    if(code === 429 && attempt < 5){ await sleep(8000 * Math.pow(1.8, attempt)); return recognizeOne(j, attempt + 1) } // 8s,15s,28s,50s,90s
+    if(attempt < 2){ await sleep(1200); return recognizeOne(j, attempt + 1) }
     return null;
   }
 }
+/* 识别队列：串行处理（避开免费档并发限流 429），每张间隔，部分失败不影响其它 */
 async function runRecognizeQueue(files){
-  const CONC = 3;                          // 同时处理的图片数，超出排队
   const out = new Array(files.length).fill(null);
-  let idx = 0, done = 0;
+  const failed = [];
+  let done = 0;
   const stat = function(){
     const el = document.getElementById('recStat');
-    if(el) el.textContent = '正在识别 ' + done + ' / ' + files.length + ' 张（并发 ' + Math.min(CONC, files.length) + '）…';
+    if(el) el.textContent = '正在识别 ' + done + ' / ' + files.length + ' 张…' + (done < files.length ? '（已识别请稍候）' : '');
   };
   stat();
-  async function worker(){
-    while(idx < files.length){
-      const my = idx++;
-      try{ const r = await recognizeOne(files[my]); out[my] = (r && r.items) || []; }
-      catch(e){ out[my] = [] }
-      done++; stat();
-    }
+  for(let my = 0; my < files.length; my++){
+    const r = await recognizeOne(files[my]);
+    if(r && Array.isArray(r.items)){ out[my] = r.items; }
+    else { out[my] = []; if(r === null) failed.push(my); }
+    done++; stat();
+    if(my < files.length - 1) await sleep(1500); // 间隔，进一步避开连发限流
   }
-  const ws = [];
-  const n = Math.min(CONC, files.length);
-  for(let i = 0; i < n; i++) ws.push(worker());
-  await Promise.all(ws);
-  return out;
+  return { out: out, failed: failed };
 }
 
 async function processImages(files){
@@ -920,7 +919,8 @@ async function processImages(files){
   openSheet('AI 识别中', '<div style="padding:16px 0;text-align:center"><span class="spinner"></span><br><span id="recStat">准备识别 ' + files.length + ' 张…</span></div>');
   try{
     await login();
-    const results = await runRecognizeQueue(files);
+    const res = await runRecognizeQueue(files);
+    const results = res.out, failed = res.failed;
     const items = []; window._aiThumb = {};
     results.forEach(function(arr, fi){
       const j = files[fi];
@@ -932,10 +932,19 @@ async function processImages(files){
         items.push(it);
       });
     });
-    if(!items.length) throw new Error('没识别出条目，可手动记一笔');
+    if(!items.length){
+      const msg = (failed.length === files.length)
+        ? '识别失败：云端限流或暂时不可用（免费档并发受限）。建议一次少选几张，或稍等 1 分钟再试。'
+        : '没识别出条目，可手动记一笔（或换张清晰点的图）';
+      throw new Error(msg);
+    }
     window._aiItems = items;
+    const warn = failed.length
+      ? '<p class="small warn" style="margin:6px 0 10px">有 ' + failed.length + ' 张识别失败（可能限流），可稍后单独重选这几张重试，其余已正常识别。</p>'
+      : '';
     openSheet('识别结果（可修改）',
       '<p class="small muted" style="margin-bottom:8px">已识别 ' + items.length + ' 笔，可逐条修改后保存。点击图片可查看原图。</p>' +
+      warn +
       items.map(function(it, i){ return aiItemRow(it, i) }).join('') +
       '<button class="btn" data-act="saveAll">全部保存（' + items.length + ' 笔）</button>');
   }catch(e){
