@@ -52,6 +52,23 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="chat-overlay hidden" id="chatOverlay">
+  <div class="chat-head">
+    <div class="chat-title">小账 · AI 聊天助手</div>
+    <button class="chat-close" data-act="closeChat">关闭</button>
+  </div>
+  <div class="chat-box" id="chatBox"></div>
+  <div class="chat-input-row">
+    <input class="chat-input" id="chatInput" placeholder="问小账点什么…" />
+    <button class="chat-send" data-act="sendChat">发送</button>
+  </div>
+</div>
+
+<div class="img-overlay hidden" id="imgOverlay">
+  <img src="" alt="">
+  <button class="img-close" data-act="closeImg">关闭</button>
+</div>
+
 <script src="app.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
