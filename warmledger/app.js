@@ -13,7 +13,7 @@ const EPS = [
 function epUrl(ep, path){ return ep + path; }
 const EMAIL = '18882632073@warmledger.app';
 const PWD = '110110nm';
-const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del', note: 'wl.note', sched: 'wl.sched', nav: 'wl.nav' };
+const K = { tx: 'wl.tx', set: 'wl.set', ses: 'wl.ses', ep: 'wl.ep', del: 'wl.del', note: 'wl.note', sched: 'wl.sched', nav: 'wl.nav', todo: 'wl.todo', chat: 'wl.chat', mem: 'wl.mem' };
 
 const CATS = {
   expense: [
@@ -158,8 +158,155 @@ function ttsStop(){
 }
 
 /* ================= 小账对话（复用 ai-accounting 的 analyze 模式，前端维护多轮历史） ================= */
-const CHAT = { list: [], open: false, busy: false, pendingImg: null };
-function chatPush(role, text){ CHAT.list.push({ role: role, text: text }) }
+const CHAT = { open: false, busy: false, pendingImg: null, hits: [], hi: -1, q: '', limit: 200 };
+const CHAT_MAX = 900;      // 本地最多留多少条
+const COMPACT_GAP = 30;    // 攒够多少条旧对话就压一次摘要
+const KEEP_LIVE = 16;      // 最近多少条永远保留原文进上下文
+
+/** 写聊天记录，配额爆了就先丢老图片、再丢最老的消息 */
+const CHAT_BUDGET = 2.4 * 1024 * 1024;   // 聊天记录在 localStorage 里的预算（字符数）
+
+/** 从最新往回算体积，超出预算的老图就丢掉（只留占位），保证最近的一定能存下 */
+function trimBySize(arr){
+  let used = 0;
+  for(let i = arr.length - 1; i >= 0; i--){
+    const m = arr[i];
+    const tlen = (m.text ? m.text.length : 0) + 80;
+    const ilen = m.img ? m.img.length : 0;
+    used += tlen + ilen;
+    if(used > CHAT_BUDGET && ilen){ m.img = ''; m.imgGone = true; used -= ilen }
+  }
+}
+function persistChat(arr){
+  for(let round = 0; round < 6; round++){
+    trimBySize(arr);
+    try{ localStorage.setItem(K.chat, JSON.stringify(arr)); return true }catch(e){
+      // 连文本都塞不下：砍掉最老的一批，还没地方就放弃，保住已有的数据
+      if(arr.length > 8){ arr.splice(0, Math.ceil(arr.length / 3)) }
+      else return false;
+    }
+  }
+  return false;
+}
+function chatPush(role, text, img){
+  const a = S.chat();
+  a.push({ id: uid(), role: role, text: String(text || ''), img: img || '', ts: Date.now() });
+  if(a.length > CHAT_MAX) a.splice(0, a.length - CHAT_MAX);
+  persistChat(a);
+  return a;
+}
+
+/* ================= 小账记忆：永久要素 + 自动压缩沉淀 =================
+   mem = { facts:[{id,k,v,ts}], sums:[{id,text,from,to,ts}], compacted:已压缩到第几条, compacting:bool }
+   facts  = 重要要素，永久记住，每次都进上下文
+   sums   = 更早对话被压缩后的摘要，滚动沉淀，省 token 又不断片
+   上下文组装 = 永久要素 + 压缩摘要 + 最近原文                          */
+function getMem(){
+  const m = S.mem();
+  if(!m.facts) m.facts = [];
+  if(!m.sums) m.sums = [];
+  if(typeof m.compacted !== 'number') m.compacted = 0;
+  return m;
+}
+
+/* 从用户说的话里抠出值得长期记住的东西 */
+const FACT_RULES = [
+  [/我叫(.{1,12}?)(?:[，,。!！?？、\s]|$)/, '称呼'],
+  [/我是(.{1,14}?)(?:[，,。!！?？、\s]|$)/, '身份'],
+  [/我的(.{1,8}?)(?:是|叫)(.{1,20}?)(?:[，,。!！?？、\s]|$)/, null],
+  [/(房租|水电|工资|奖金|生活费|预算|花呗|房贷|车贷|保险)(?:是|每月|一个月)?\s*(\d[\d,.]*)\s*元?/, null],
+  [/(?:每月|每个月|一个月)(.{0,6}?)(\d[\d,.]*)\s*元/, null],
+  [/记住[:：]?\s*(.{2,40})/, '要求记住'],
+  [/我(?:喜欢|不喜欢|讨厌|想买|想要|准备|打算|计划)(.{1,22}?)(?:[，,。!！?？、\s]|$)/, '偏好'],
+  [/我(?:过敏|忌口|不能吃|不吃)(.{1,16}?)(?:[，,。!！?？、\s]|$)/, '忌口'],
+  [/我(?:在|住)(.{1,14}?(?:市|区|县|小区|宿舍|公司))/, '位置'],
+  [/我养(?:了)?(.{1,12}?)(?:[，,。!！?？、\s]|$)/, '宠物'],
+  [/(?:目标|计划|打算)(?:是)?(.{1,28}?)(?:[，,。!！?？、\s]|$)/, '目标']
+];
+
+function extractFacts(text){
+  const out = [];
+  const s = String(text || '').trim();
+  if(s.length < 2 || s.length > 220) return out;
+  for(let i = 0; i < FACT_RULES.length; i++){
+    const rule = FACT_RULES[i], label = rule[1], m = s.match(rule[0]);
+    if(!m) continue;
+    let k = label, v = '';
+    if(!k){
+      if(m.length >= 3) k = m[1].trim() || '备注';
+      v = (m[2] || '').trim();
+    } else {
+      v = (m[1] || '').trim();
+    }
+    k = k.replace(/^[的地得，,。!！?？怎么是多少是]+/, '').trim();
+    v = v.replace(/^[的地得，,。!！?？]+/, '').trim();
+    if(!k || !v || k.length > 14 || v.length > 40) continue;
+    if(/^(什么|怎么|多少|啊|吧|呢|这|那|我|你|他)$/.test(v)) continue;
+    out.push({ k: k, v: v });
+  }
+  return out;
+}
+
+function memAbsorb(text){
+  const got = extractFacts(text);
+  if(!got.length) return 0;
+  const m = getMem();
+  let n = 0;
+  got.forEach(function(f){
+    const ex = m.facts.findIndex(x => x.k === f.k && x.v === f.v);
+    if(ex >= 0){ m.facts[ex].ts = Date.now(); m.facts[ex].hits = (m.facts[ex].hits || 1) + 1 }
+    else { m.facts.push({ id: uid(), k: f.k, v: f.v, ts: Date.now(), hits: 1 }); n++ }
+  });
+  if(m.facts.length > 80) m.facts = m.facts.sort((a, b) => a.ts - b.ts).slice(-80);
+  S.saveMem(m);
+  return n;
+}
+
+/** 攒够一批旧对话就调后端压成摘要，并把那批的图片数据清掉省空间 */
+async function maybeCompact(){
+  const m = getMem();
+  if(m.compacting) return;
+  const all = S.chat();
+  const pending = all.length - m.compacted - KEEP_LIVE;
+  if(pending < COMPACT_GAP) return;
+  const slice = all.slice(m.compacted, m.compacted + pending);
+  if(!slice.length) return;
+  m.compacting = true; S.saveMem(m);
+  try{
+    await login();
+    const convo = slice.map(function(x){
+      return (x.role === 'user' ? '用户' : '小账') + '：' + String(x.text || '').slice(0, 180);
+    }).join('\n');
+    const p = '把下面这段对话压成一段 180 字以内的中文摘要，务必保留：用户的个人信息与称呼、长期偏好与忌口、钱数和日期、承诺要做的待办、还没解决的问题。照片类内容一句话带过即可。只输出摘要本身，不要开头和结尾的客套话。\n\n' + convo;
+    const r = await req('/functions/v1/ai-accounting', { method: 'POST', timeout: 60000, body: { mode: 'analyze', text: p } });
+    const txt = ((r && r.text) || '').trim();
+    if(txt.length > 6){
+      m.sums.push({ id: uid(), text: txt.slice(0, 400), from: slice[0].ts, to: slice[slice.length - 1].ts, ts: Date.now() });
+      if(m.sums.length > 12) m.sums = m.sums.slice(-12);
+      m.compacted = m.compacted + pending;
+      slice.forEach(function(x){ if(x.img){ x.img = ''; x.imgGone = true } });
+      persistChat(all);
+      S.saveMem(m);
+      const el = document.getElementById('memStat');
+      if(el) el.textContent = '已沉淀 ' + m.sums.length + ' 段';
+    }
+  }catch(e){ /* 压缩失败不影响聊天 */ }
+  m.compacting = false;
+  try{ S.saveMem(m) }catch(e){}
+}
+
+/** 组装上下文：永久要素 + 压缩摘要 + 最近原文 */
+function buildContext(){
+  const m = getMem();
+  const all = S.chat();
+  const recent = all.slice(-KEEP_LIVE).filter(x => x.role === 'user' || x.role === 'assistant');
+  const facts = m.facts.slice(-20);
+  const sums = m.sums.slice(-4);
+  let head = '';
+  if(facts.length) head += '【关于用户，必须长期记住，回答时直接用】\n' + facts.map(f => '- ' + f.k + '：' + f.v).join('\n') + '\n\n';
+  if(sums.length) head += '【更早对话的压缩摘要】\n' + sums.map(s => '- ' + s.text).join('\n') + '\n\n';
+  return { head: head, recent: recent.map(x => ({ role: x.role, text: x.text })) };
+}
 
 const CALCS = [
   ['budget','预算','看本月还能花多少','M4 6h16M4 12h16M4 18h10'],
@@ -192,7 +339,13 @@ const S = {
   sched(){ try{ return JSON.parse(localStorage.getItem(K.sched) || '[]') }catch(e){ return [] } },
   saveSched(v){ localStorage.setItem(K.sched, JSON.stringify(v)) },
   nav(){ try{ return JSON.parse(localStorage.getItem(K.nav) || '[]') }catch(e){ return [] } },
-  saveNav(v){ localStorage.setItem(K.nav, JSON.stringify(v)) }
+  saveNav(v){ localStorage.setItem(K.nav, JSON.stringify(v)) },
+  todo(){ try{ return JSON.parse(localStorage.getItem(K.todo) || '[]') }catch(e){ return [] } },
+  saveTodo(v){ localStorage.setItem(K.todo, JSON.stringify(v)) },
+  chat(){ try{ return JSON.parse(localStorage.getItem(K.chat) || '[]') }catch(e){ return [] } },
+  saveChat(v){ localStorage.setItem(K.chat, JSON.stringify(v)) },
+  mem(){ try{ return JSON.parse(localStorage.getItem(K.mem) || '{}') }catch(e){ return {} } },
+  saveMem(v){ localStorage.setItem(K.mem, JSON.stringify(v)) }
 };
 
 /* ================= 工具 ================= */
@@ -453,7 +606,7 @@ window.addEventListener('popstate', function(e){
 
 function render(){
   const v = document.getElementById('view');
-  const titles = { home: '首页', records: '账单', calc: '计算器', ai: 'AI 助手', settings: '设置', calendar: '日历', nav: '导航' };
+  const titles = { home: '首页', records: '账单', calc: '计算器', ai: 'AI 助手', settings: '设置', calendar: '日历', nav: '导航', note: '便签' };
   document.getElementById('pageTitle').textContent = titles[page] || '暖记';
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('is-active', b.dataset.page === page || (page === 'calendar' && b.dataset.page === 'home')));
   applyBg();
@@ -464,6 +617,7 @@ function render(){
   else if(page === 'settings') v.innerHTML = viewSettings();
   else if(page === 'calendar') v.innerHTML = viewCalendar();
   else if(page === 'nav') v.innerHTML = viewNav();
+  else if(page === 'note') v.innerHTML = viewNote();
   window.scrollTo(0, 0);
   setTimeout(fillImgs, 0);
 }
@@ -1309,15 +1463,133 @@ function closeChat(){
 function renderChat(){
   const box = document.getElementById('chatBox');
   if(!box) return;
-  if(!CHAT.list.length){
-    box.innerHTML = '<div class="chat-welcome">我是小账，你的记账搭子 💬<br>可以问我：这个月花了多少？怎么省钱？帮我算笔账～</div>';
+  const all = S.chat();
+  if(!all.length){
+    box.innerHTML = '<div class="chat-welcome">我是小账，你的记账搭子 💬<br>可以问我：这个月花了多少？怎么省钱？帮我算笔账～' +
+      '<div class="chat-welcome-sub">我说过的话都会沉淀成长期记忆；聊多了旧的会自动压缩成摘要，重要的则永久记住。上面的「查找」可以翻历史，「记忆」能看到我记住了什么。</div></div>';
     return;
   }
-  box.innerHTML = CHAT.list.map(function(m){
-    const img = m.img ? '<div class="chat-img-wrap"><img class="chat-img-thumb" src="' + m.img + '" alt="图片"></div>' : '';
-    return '<div class="chat-msg ' + m.role + '"><div class="bubble">' + img + mdLite(m.text) + '</div></div>';
+  const start = Math.max(0, all.length - CHAT.limit);
+  const show = all.slice(start);
+  let html = '';
+  if(start > 0){
+    html += '<div class="chat-more"><button class="chat-more-btn" data-act="chatMore">往下滑之前先加载更早的 ' + start + ' 条</button></div>';
+  }
+  html += show.map(function(m, idx){
+    const img = m.img ? '<div class="chat-img-wrap"><img class="chat-img-thumb" src="' + m.img + '" alt="图片"></div>'
+      : (m.imgGone ? '<div class="chat-img-gone">🖼️ 图片（已随旧对话压缩归档）</div>' : '');
+    return '<div class="chat-msg ' + m.role + '" data-mi="' + (start + idx) + '">' +
+      '<div class="bubble">' + img + mdLite(m.text) + '</div></div>';
   }).join('');
+  box.innerHTML = html;
   box.scrollTop = box.scrollHeight;
+}
+
+/* ================= 历史记忆查找 ================= */
+function memToggleSearch(){
+  const bar = document.getElementById('chatSearch');
+  if(!bar) return;
+  if(bar.classList.contains('hidden')){
+    bar.classList.remove('hidden');
+    const i = document.getElementById('chatSearchInput');
+    if(i){ i.focus(); if(CHAT.q) memRunSearch(CHAT.q); }
+  } else { memCloseSearch() }
+}
+function memCloseSearch(){
+  const bar = document.getElementById('chatSearch');
+  if(bar) bar.classList.add('hidden');
+  CHAT.q = ''; CHAT.hits = []; CHAT.hi = -1;
+  const inp = document.getElementById('chatSearchInput'); if(inp) inp.value = '';
+  const cnt = document.getElementById('chatSearchCnt'); if(cnt) cnt.textContent = '';
+  const box = document.getElementById('chatBox');
+  if(box) box.querySelectorAll('.chat-msg.is-hit').forEach(el => el.classList.remove('is-hit'));
+}
+function memSearchInput(){
+  const inp = document.getElementById('chatSearchInput');
+  const q = (inp && inp.value || '').trim();
+  CHAT.q = q;
+  memRunSearch(q);
+}
+function memRunSearch(q){
+  const cnt = document.getElementById('chatSearchCnt');
+  const box = document.getElementById('chatBox');
+  if(!box) return;
+  box.querySelectorAll('.chat-msg.is-hit').forEach(el => el.classList.remove('is-hit'));
+  CHAT.hits = []; CHAT.hi = -1;
+  if(!q || q.length < 1){
+    if(cnt) cnt.textContent = '';
+    return;
+  }
+  const all = S.chat();
+  const low = q.toLowerCase();
+  all.forEach(function(m, i){ if(String(m.text || '').toLowerCase().indexOf(low) >= 0) CHAT.hits.push(i) });
+  if(!CHAT.hits.length){
+    if(cnt) cnt.textContent = '没找到';
+    toast('历史里没有「' + q + '」');
+    return;
+  }
+  // 命中的可能比当前渲染的还早，自动放开条数
+  const need = all.length - CHAT.hits[0];
+  if(need > CHAT.limit) CHAT.limit = Math.min(need + 50, CHAT_MAX);
+  renderChat();
+  if(cnt) cnt.textContent = '共 ' + CHAT.hits.length + ' 条';
+  CHAT.hi = -1;
+  memGo(1);
+}
+function memGo(d){
+  if(!CHAT.hits.length) return;
+  CHAT.hi = (CHAT.hi + d + CHAT.hits.length) % CHAT.hits.length;
+  const mi = CHAT.hits[CHAT.hi];
+  const box = document.getElementById('chatBox');
+  if(!box) return;
+  box.querySelectorAll('.chat-msg.is-hit').forEach(el => el.classList.remove('is-hit'));
+  let el = box.querySelector('[data-mi="' + mi + '"]');
+  if(!el){ CHAT.limit = CHAT_MAX; renderChat(); el = box.querySelector('[data-mi="' + mi + '"]') }
+  if(el){
+    el.classList.add('is-hit');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  const cnt = document.getElementById('chatSearchCnt');
+  if(cnt) cnt.textContent = (CHAT.hi + 1) + ' / ' + CHAT.hits.length;
+}
+function chatMoreBtn(){
+  const box = document.getElementById('chatBox');
+  const before = box ? box.scrollHeight : 0;
+  CHAT.limit = Math.min(CHAT.limit + 300, CHAT_MAX);
+  renderChat();
+  if(box){ box.scrollTop = box.scrollHeight - before; }
+}
+
+/* ================= 记忆仓库查看 ================= */
+function memView(){
+  const m = getMem();
+  const facts = m.facts.slice().sort((a, b) => b.ts - a.ts);
+  const sums = m.sums.slice().sort((a, b) => b.ts - a.ts);
+  let html = '<div class="mem-card"><div class="mem-h">永久记住的事实（' + facts.length + '）</div>';
+  html += facts.length ? facts.map(function(f){
+    return '<div class="mem-row"><div class="mem-kv"><b>' + esc(f.k) + '</b><span>' + esc(f.v) + '</span></div>' +
+      '<button class="mem-del" data-act="memDelFact" data-id="' + f.id + '">删</button></div>';
+  }).join('') : '<div class="mem-empty">还没有。你可以说「我叫小王」「房租每月 3200」「我对芒果过敏」，这些会自动记住。</div>';
+  html += '</div>';
+  html += '<div class="mem-card"><div class="mem-h">压缩沉淀的历史摘要（' + sums.length + '）</div>';
+  html += sums.length ? sums.map(function(s){
+    const day = s.to ? ymd(s.to) : '';
+    return '<div class="mem-row col"><div class="mem-sum">' + esc(s.text) + '</div>' +
+      '<div class="mem-foot"><span>' + day + '</span><button class="mem-del" data-act="memDelSum" data-id="' + s.id + '">删</button></div></div>';
+  }).join('') : '<div class="mem-empty">聊够 ' + COMPACT_GAP + ' 条以上，旧对话会自动压成摘要留在这里。</div>';
+  html += '</div>';
+  html += '<div class="mem-tip">这些会在你每次问小账时自动带上，所以它不像"第一次聊天"。不需要的点右边删掉。</div>';
+  openSheet('小账记住了什么', html);
+}
+function memDelFact(id){
+  const m = getMem();
+  m.facts = m.facts.filter(x => x.id !== id);
+  S.saveMem(m); memView(); toast('已经忘掉');
+}
+function memDelSum(id){
+  const m = getMem();
+  m.sums = m.sums.filter(x => x.id !== id);
+  S.saveMem(m); memView(); toast('已删除');
 }
 async function sendChat(){
   if(CHAT.busy) return;
@@ -1327,7 +1599,9 @@ async function sendChat(){
   if(!text && !img) return;
   inp.value = '';
   CHAT.pendingImg = null;
-  CHAT.list.push({ role:'user', text: text || '（发了一张图片）', img: img });
+  const nnew = memAbsorb(text);            // 抠出值得永久记住的要素
+  chatPush('user', text || '（发了一张图片）', img);
+  if(nnew) toast('记住了 ' + nnew + ' 条要点');
   renderChat();
   CHAT.busy = true;
   const box = document.getElementById('chatBox');
@@ -1338,8 +1612,10 @@ async function sendChat(){
   box.scrollTop = box.scrollHeight;
   try{
     await login();
-    const hist = CHAT.list.slice(0, -1).map(function(m){ return { role:m.role, text:m.text } });
-    const lastText = CHAT.list[CHAT.list.length - 1].text;
+    const ctx = buildContext();
+    const MEMHEAD = ctx.head;
+    const hist = ctx.recent.slice(0, -1);   // 组装好的上下文（最近原文），去掉刚发的这一条
+    const lastText = text || '（发了一张图片）';
     let reply = null;
     let imgText = '';
     if(img){
@@ -1350,7 +1626,7 @@ async function sendChat(){
           imgText = rr.items.map(function(it){ return (it.amount ? ('¥' + it.amount + ' ') : '') + (it.category || '') + (it.note ? (' ' + it.note) : '') }).join('\n');
         }
       }catch(e){ /* 忽略识别失败 */ }
-      const augText = (imgText ? '【图片中识别到的内容】\n' + imgText + '\n\n' : '') + lastText;
+      const augText = MEMHEAD + (imgText ? '【图片中识别到的内容】\n' + imgText + '\n\n' : '') + lastText;
       // 优先让后端多模态“看”图（agent/image 模式，需要部署后端）
       try{
         const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: augText, history: hist, image: img } });
@@ -1371,11 +1647,11 @@ async function sendChat(){
     } else {
       // 纯文本：优先 agent，未部署则 analyze 兜底
       try{
-        const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: lastText, history: hist } });
+        const r = await req('/functions/v1/ai-accounting', { method:'POST', timeout:60000, body:{ mode:'agent', text: MEMHEAD + lastText, history: hist } });
         if(r && r.text) reply = r.text;
       }catch(e){}
       if(!reply){
-        const prompt = '你是记账 App「暖记」的 AI 助手“小账”，也是百事通贴心小助理：可以聊记账省钱，也可以聊生活、健康、情感、出行、百科等任何话题，像朋友一样自然。' +
+        const prompt = MEMHEAD + '你是记账 App「暖记」的 AI 助手“小账”，也是百事通贴心小助理：可以聊记账省钱，也可以聊生活、健康、情感、出行、百科等任何话题，像朋友一样自然。' +
           '若用户要你执行操作（记账/计算/查账/生成背景），只输出一个 ```json 工具块 ```（{"tool":"add_tx|calc|query|gen_bg","args":{...}}），不要其它文字；其它情况用自然语言简洁友好回答（200 字内）。' +
           '分类id：餐饮food/外卖takeout/交通transport/加油fuel/购物shopping/居家home/房租rent/水电燃气utility/数码digital/通讯comm/娱乐fun/旅行travel/美容beauty/医疗medical/宠物pet/教育edu/运动sport/咖啡coffee/菜场超市market/人情social/保险insurance/订阅会员subscription/税费tax_fee/其他other_exp / 工资salary/奖金bonus/理财收益invest/兼职parttime/红包redpacket_in/分红dividend/退款refund/租金收入rental_in/零花钱allowance/其他收入other_inc。' +
           'calc 参数：discount{orig:原价,discount:折扣如8.5表85折} rise{old:原价,now:现价} installment{total:总额,periods:期数,rate:每期手续费率%}。query 参数：month_exp|month_inc|balance|today_exp|top_cat。金额自动转阿拉伯数字，直接执行不要反问。' +
@@ -1402,6 +1678,7 @@ async function sendChat(){
     renderChat();
   }
   CHAT.busy = false;
+  maybeCompact();          // 后台把攒够的旧对话压成摘要，不阻塞界面
 }
 
 /* ================= 聊天发图 ================= */
@@ -1423,6 +1700,174 @@ function chatPickImg(){
     renderChat();
   };
   inp.click();
+}
+
+/* ================= 便签 / 待办（每日任务 · 打钩完成度） =================
+   每条：{id, title, note, date:'YYYY-MM-DD', remind:'HH:mm' 或 '', daily:bool,
+          done:bool, doneAt:ms, doneDates:['YYYY-MM-DD'...], createdAt:ms}
+   普通任务完成与否看 done；每日任务（daily）按 doneDates 记录“哪天打过钩”，每天独立。 */
+function isDoneOn(t, d){
+  return t.daily ? ((t.doneDates || []).indexOf(d) >= 0) : !!t.done;
+}
+function pct(a, b){ return b > 0 ? Math.round(a / b * 100) : 0 }
+
+function viewNote(){
+  const list = S.todo();
+  const today = ymd(Date.now());
+  const daily = list.filter(t => t.daily);
+  const todayItems = list.filter(t => !t.daily && t.date === today && !t.done);
+  const backlog = list.filter(t => !t.daily && !t.done && t.date < today)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  const total = daily.length + todayItems.length;
+  const doneN = daily.filter(t => isDoneOn(t, today)).length + todayItems.filter(t => t.done).length;
+  const p = pct(doneN, total);
+  let doneAgo = list.filter(t => !t.daily && t.done && ymd(t.doneAt || t.createdAt) === today);
+
+  let html = '<div class="card td-sum">' +
+    '<div class="td-sum-top"><div><div class="td-sum-num">' + doneN + ' / ' + total + '</div>' +
+    '<div class="td-sum-lab">今日任务完成度' + (daily.length ? '（含每日 ' + daily.length + ' 项）' : '') + '</div></div>' +
+    '<div class="td-sum-pct">' + p + '%</div></div>' +
+    '<div class="td-bar"><i style="width:' + p + '%"></i></div>' +
+    '<div class="td-sum-foot"><span>还清 ' + (total - doneN) + ' 项</span>' +
+    '<span>' + (p === 100 && total > 0 ? '今天全做完了，漂亮 🎉' : (total === 0 ? '还没派任务，点下面加一条' : '继续加油～')) + '</span></div>' +
+    '</div>';
+
+  html += '<div class="card td-group"><div class="td-ghead"><span class="dot daily"></span>每日任务' +
+    '<button class="td-add" data-act="todoNew" data-id="daily">+ 加每日</button></div>';
+  html += daily.length ? daily.map(t => todoRow(t, today)).join('')
+    : '<div class="td-empty">每天都要做的事放这儿，比如记账、吃药、喝水打卡</div>';
+  html += '</div>';
+
+  html += '<div class="card td-group"><div class="td-ghead"><span class="dot today"></span>今天 · ' + today +
+    '<button class="td-add" data-act="todoNew" data-id="' + today + '">+ 加任务</button></div>';
+  html += todayItems.length ? todayItems.map(t => todoRow(t, today)).join('')
+    : '<div class="td-empty">今天还没有安排</div>';
+  if(doneAgo.length){
+    html += '<div class="td-done-head">今天已完成 ' + doneAgo.length + ' 项' +
+      '<button class="td-add" data-act="todoClear">清空</button></div>' +
+      doneAgo.map(t => todoRow(t, today)).join('');
+  }
+  html += '</div>';
+
+  if(backlog.length){
+    html += '<div class="card td-group"><div class="td-ghead"><span class="dot late"></span>往期没做完 · ' + backlog.length +
+      '<button class="td-add" data-act="todoLift">全部挪到今天</button></div>' +
+      backlog.map(t => todoRow(t, today)).join('') + '</div>';
+  }
+
+  if(!list.length){
+    html += '<div class="card"><div class="empty-note">便签还是空的。<br>可以记「每天记账」「周三交房租」「给妈打电话」这类，打钩就有成就感。</div></div>';
+  }
+  return html;
+}
+
+function todoRow(t, today){
+  const done = isDoneOn(t, today);
+  const meta = [];
+  if(t.daily) meta.push('每天');
+  else if(t.date < today && !t.done) meta.push('原定 ' + t.date);
+  if(t.remind) meta.push('⏰ ' + t.remind);
+  if(t.note) meta.push(t.note);
+  return '<div class="td-item' + (done ? ' done' : '') + '">' +
+    '<button class="td-check' + (done ? ' on' : '') + '" data-act="todoToggle" data-id="' + t.id + '">' +
+      (done ? '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>' : '') + '</button>' +
+    '<div class="td-body" data-act="todoEdit" data-id="' + t.id + '">' +
+      '<div class="td-title">' + esc(t.title) + '</div>' +
+      (meta.length ? '<div class="td-meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+    '</div>' +
+    '<button class="td-del" data-act="todoDel" data-id="' + t.id + '">删除</button>' +
+    '</div>';
+}
+
+function openNoteForm(id, presetDate, daily){
+  const t = id ? S.todo().find(x => x.id === id) : null;
+  const date = t ? t.date : (presetDate && presetDate !== 'daily' ? presetDate : ymd(Date.now()));
+  const isDaily = t ? !!t.daily : (daily === true || presetDate === 'daily');
+  openSheet(t ? '编辑任务' : '新建任务', '' +
+    '<div class="field"><label>要做什么</label><input class="input" id="tdTitle" value="' + esc(t ? t.title : '') + '" placeholder="如：给妈打电话"></div>' +
+    '<div class="field"><label>备注（选填）</label><input class="input" id="tdNote" value="' + esc(t ? (t.note || '') : '') + '" placeholder="选填"></div>' +
+    (isDaily ? '' : '<div class="field"><label>日期</label><input class="input" id="tdDate" type="date" value="' + date + '"></div>') +
+    '<div class="field"><label>提醒时间（选填，到点通知栏提醒）</label><input class="input" id="tdRemind" type="time" value="' + esc(t ? (t.remind || '') : '') + '"></div>' +
+    '<div class="row between" style="padding:6px 0"><span>设为每日任务</span>' +
+      '<div class="switch' + (isDaily ? ' on' : '') + '" id="tdDailySw" data-act="tdDaily"><i></i></div></div>' +
+    '<input type="hidden" id="tdId" value="' + (t ? t.id : '') + '">' +
+    '<input type="hidden" id="tdDaily" value="' + (isDaily ? '1' : '') + '">' +
+    '<div style="display:flex;gap:10px;margin-top:12px">' +
+      '<button class="btn ghost" style="flex:1" data-act="closeSheet">取消</button>' +
+      '<button class="btn" style="flex:2" data-act="todoSave">保存</button>' +
+    '</div>');
+}
+function todoDailySwitch(){
+  const sw = document.getElementById('tdDailySw');
+  const hd = document.getElementById('tdDaily');
+  if(!sw || !hd) return;
+  hd.value = hd.value === '1' ? '' : '1';
+  sw.classList.toggle('on', hd.value === '1');
+}
+
+function saveTodoItem(){
+  const idEl = document.getElementById('tdId');
+  const title = ((document.getElementById('tdTitle') || {}).value || '').trim();
+  if(!title){ toast('先写点要做什么'); return }
+  const note = ((document.getElementById('tdNote') || {}).value || '').trim();
+  const daily = ((document.getElementById('tdDaily') || {}).value || '') === '1';
+  const dateEl = document.getElementById('tdDate');
+  const date = daily ? '' : ((dateEl && dateEl.value) || ymd(Date.now()));
+  const remind = ((document.getElementById('tdRemind') || {}).value || '').trim();
+  const arr = S.todo();
+  const id = idEl && idEl.value;
+  let item = null;
+  if(id){
+    const i = arr.findIndex(x => x.id === id);
+    if(i >= 0) item = arr[i] = Object.assign(arr[i], { title: title, note: note, daily: daily, date: date, remind: remind });
+  }
+  if(!item){
+    item = { id: uid(), title: title, note: note, daily: daily, date: date, remind: remind, done: false, doneAt: 0, doneDates: [], createdAt: Date.now() };
+    arr.push(item);
+  }
+  S.saveTodo(arr);
+  closeSheet(); render();
+  todoSetRemind(item);
+  toast(id ? '已更新' : '已添加');
+}
+
+function todoSetRemind(item){
+  if(!item.remind || !window.Android || !window.Android.scheduleReminder) return;
+  const d = item.daily ? ymd(Date.now()) : item.date;
+  if(!d) return;
+  const when = new Date(d + 'T' + item.remind + ':00').getTime();
+  if(isNaN(when)) return;
+  const fire = (item.daily && when <= Date.now()) ? when + 86400000 : when;
+  try{ window.Android.scheduleReminder('待办：' + item.title, (item.note ? item.note + ' · ' : '') + d, fire, 'todo-' + item.id) }catch(e){}
+}
+
+function toggleTodo(id){
+  const arr = S.todo(); const i = arr.findIndex(x => x.id === id);
+  if(i < 0) return;
+  const t = arr[i]; const today = ymd(Date.now());
+  if(t.daily){
+    t.doneDates = t.doneDates || [];
+    const k = t.doneDates.indexOf(today);
+    if(k >= 0) t.doneDates.splice(k, 1); else t.doneDates.push(today);
+  } else {
+    t.done = !t.done;
+    t.doneAt = t.done ? Date.now() : 0;
+  }
+  S.saveTodo(arr); render();
+}
+
+function delTodo(id){ S.saveTodo(S.todo().filter(x => x.id !== id)); render(); toast('已删除') }
+
+function clearDoneTodo(){
+  const today = ymd(Date.now());
+  S.saveTodo(S.todo().filter(t => !(t.done && ymd(t.doneAt || t.createdAt) === today)));
+  render(); toast('已清空今日完成记录');
+}
+
+function liftBacklog(){
+  const today = ymd(Date.now());
+  S.saveTodo(S.todo().map(t => (!t.daily && !t.done && t.date < today) ? Object.assign({}, t, { date: today }) : t));
+  render(); toast('已全部挪到今天');
 }
 
 /* ================= 日程 / 提醒 ================= */
@@ -1748,6 +2193,15 @@ function openInApp(url){
 const ACTIONS = {
   go(el, id){ goPage(id) },
   calendar(){ window._calDay = null; goPage('calendar') },
+  /* 便签 / 待办 */
+  todoNew(el, id){ openNoteForm(null, id) },
+  todoEdit(el, id){ openNoteForm(id) },
+  tdDaily(){ todoDailySwitch() },
+  todoSave(){ saveTodoItem() },
+  todoToggle(el, id){ toggleTodo(id) },
+  todoDel(el, id){ delTodo(id) },
+  todoClear(){ clearDoneTodo() },
+  todoLift(){ liftBacklog() },
   calPrev(){ const d = new Date(calCursor); d.setMonth(d.getMonth() - 1); calCursor = d.getTime(); window._calDay = null; render() },
   calNext(){ const d = new Date(calCursor); d.setMonth(d.getMonth() + 1); calCursor = d.getTime(); window._calDay = null; render() },
   calDay(el, id){ window._calDay = id; render() },
@@ -1906,7 +2360,17 @@ const ACTIONS = {
   navOpen(el, id){ navOpen(el, id) },
   navAuto(){ navAuto() },
   navUpload(){ navUpload() },
-  navEmoji(el, id){ navEmoji(el, id) }
+  navEmoji(el, id){ navEmoji(el, id) },
+
+  /* 小账历史记忆 */
+  memSearch(){ memToggleSearch() },
+  memPrev(){ memGo(-1) },
+  memNext(){ memGo(1) },
+  memCloseSearch(){ memCloseSearch() },
+  memView(){ memView() },
+  memDelFact(el, id){ memDelFact(id) },
+  memDelSum(el, id){ memDelSum(id) },
+  chatMore(){ chatMoreBtn() }
 };
 
 document.addEventListener('click', function(e){
@@ -1917,6 +2381,7 @@ document.addEventListener('click', function(e){
 });
 
 document.addEventListener('input', function(e){
+  if(e.target.id === 'chatSearchInput'){ memSearchInput(); return; }
   const dn = e.target.closest('#dayNote');
   if(dn){ const notes = S.note(); notes[dn.dataset.id] = dn.value; S.saveNote(notes); return; }
   const body = document.getElementById('sheetBody');
