@@ -200,7 +200,7 @@ textarea.input{min-height:64px;resize:vertical}
 
 /* ---------- 底部导航 ---------- */
 .tabbar{
-  position:fixed;left:0;right:0;bottom:0;z-index:40;display:grid;grid-template-columns:repeat(6,1fr);
+  position:fixed;left:0;right:0;bottom:0;z-index:40;display:grid;grid-template-columns:repeat(7,1fr);
   background:#fff;border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);height:calc(var(--tab-h) + env(safe-area-inset-bottom));
 }
@@ -267,6 +267,65 @@ textarea.input{min-height:64px;resize:vertical}
 
 /* ---------- 账单图片缩略 ---------- */
 .tx-img{width:38px;height:38px;border-radius:9px;object-fit:cover;flex:0 0 auto;margin-right:-4px;border:1px solid var(--line)}
+
+/* ---------- 便签 / 待办 ---------- */
+.td-sum-top{display:flex;align-items:flex-end;justify-content:space-between}
+.td-sum-num{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.2}
+.td-sum-lab{font-size:12px;color:var(--muted);margin-top:3px}
+.td-sum-pct{font-size:28px;font-weight:700;color:var(--brand);font-variant-numeric:tabular-nums}
+.td-bar{height:8px;border-radius:999px;background:var(--line-soft);margin-top:12px;overflow:hidden}
+.td-bar i{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,var(--brand),#7BE0BE);transition:width .3s}
+.td-sum-foot{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted);margin-top:8px}
+.td-group{padding:14px 14px 8px}
+.td-ghead{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;margin-bottom:6px}
+.td-ghead .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.td-ghead .dot.daily{background:#F2A33C}
+.td-ghead .dot.today{background:var(--brand)}
+.td-ghead .dot.late{background:var(--expense)}
+.td-add{margin-left:auto;background:none;border:0;color:var(--brand-dark);font-size:13px;padding:0;flex:0 0 auto}
+.td-item{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.td-item:last-child{border-bottom:0}
+.td-check{width:22px;height:22px;margin-top:1px;border-radius:50%;border:1.6px solid #CFD8DB;background:#fff;flex:0 0 auto;display:flex;align-items:center;justify-content:center;padding:0}
+.td-check svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+.td-check.on{background:var(--brand);border-color:var(--brand)}
+.td-body{flex:1;min-width:0;text-align:left}
+.td-title{font-size:15px;line-height:1.45;word-break:break-word}
+.td-meta{font-size:12px;color:var(--muted);margin-top:3px;word-break:break-word}
+.td-item.done .td-title{text-decoration:line-through;color:var(--muted)}
+.td-item.done .td-meta{color:#B6C0C4}
+.td-del{background:none;border:0;color:#C3CCD0;font-size:12px;flex:0 0 auto;padding:2px 0}
+.td-empty{font-size:13px;color:var(--muted);padding:8px 0 12px}
+.td-done-head{display:flex;align-items:center;font-size:12px;color:var(--muted);margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)}
+.empty-note{font-size:13px;color:var(--muted);line-height:1.9}
+
+/* ---------- 小账：历史查找 / 记忆 ---------- */
+.chat-head-act{display:flex;align-items:center;gap:16px}
+.chat-act{background:none;border:0;color:var(--brand-dark);font-size:14px;padding:0}
+.chat-search{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--line);background:#fff}
+.chat-search.hidden{display:none}
+.chat-search-input{flex:1;min-width:0;border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;background:#fff}
+.chat-search-input:focus{outline:none;border-color:var(--brand)}
+.chat-search-cnt{flex:0 0 auto;min-width:42px;text-align:center;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chat-sbtn{background:var(--brand-soft);color:var(--brand-dark);border:0;border-radius:999px;padding:6px 9px;font-size:12px;flex:0 0 auto}
+.chat-more{text-align:center;margin-bottom:14px}
+.chat-more-btn{background:var(--brand-soft);color:var(--brand-dark);border:0;border-radius:999px;padding:7px 16px;font-size:12px}
+.chat-img-gone{display:inline-block;font-size:12px;color:var(--muted);background:#F4F7F8;border-radius:8px;padding:4px 9px;margin-bottom:6px}
+.chat-welcome-sub{font-size:12px;color:#9AA4A9;margin-top:16px;line-height:1.8;text-align:left;background:#fff;border:1px dashed var(--line);border-radius:10px;padding:10px 12px}
+.chat-msg.is-hit .bubble{box-shadow:0 0 0 2px #F2C14E;animation:hitflash 1.2s ease}
+@keyframes hitflash{0%{background:#FFF6DF}100%{}}
+.mem-card{margin-bottom:16px}
+.mem-h{font-weight:600;font-size:14px;margin-bottom:6px}
+.mem-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line-soft)}
+.mem-row.col{flex-direction:column;align-items:stretch;gap:6px}
+.mem-kv{flex:1;display:flex;gap:8px;font-size:14px;min-width:0}
+.mem-kv b{color:var(--brand-dark);font-weight:600;flex:0 0 auto}
+.mem-kv span{color:var(--text);word-break:break-word}
+.mem-sum{font-size:13px;line-height:1.65}
+.mem-foot{display:flex;justify-content:space-between;align-items:center}
+.mem-foot span{font-size:11px;color:var(--muted)}
+.mem-del{background:none;border:0;color:#C3CCD0;font-size:12px;flex:0 0 auto}
+.mem-empty{font-size:12px;color:var(--muted);line-height:1.8;padding:4px 0}
+.mem-tip{font-size:12px;color:var(--muted);line-height:1.7;background:var(--brand-soft);border-radius:10px;padding:10px 12px}
 .ai-thumb{border-radius:10px;overflow:hidden;margin-bottom:8px;cursor:pointer}
 .ai-thumb img{width:100%;display:block;max-height:160px;object-fit:cover}
 .ai-thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
