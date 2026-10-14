@@ -34,6 +34,9 @@
   <button class="tab" data-page="ai">
     <svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 16l.8 2.2L21 19l-2.2.8L18 22l-.8-2.2L15 19l2.2-.8z"/></svg><span>AI</span>
   </button>
+  <button class="tab" data-page="note">
+    <svg viewBox="0 0 24 24"><path d="M9 5h10M9 12h10M9 19h10M4 5l1.6 1.6L8 4M4 12l1.6 1.6L8 11M4 19l1.6 1.6L8 18"/></svg><span>便签</span>
+  </button>
   <button class="tab" data-page="settings">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-1.8-.3 1.6 1.6 0 00-1 1.5V21a2 2 0 11-4 0v-.1A1.6 1.6 0 008 19.4a1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.6 1.6 0 00.3-1.8 1.6 1.6 0 00-1.5-1H2a2 2 0 110-4h.1A1.6 1.6 0 004.6 8a1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.6 1.6 0 001.8.3H9a1.6 1.6 0 001-1.5V2a2 2 0 114 0v.1a1.6 1.6 0 001 1.5 1.6 1.6 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8V9a1.6 1.6 0 001.5 1H21a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z"/></svg><span>设置</span>
   </button>
@@ -58,7 +61,18 @@
 <div class="chat-overlay hidden" id="chatOverlay">
   <div class="chat-head">
     <div class="chat-title">小账 · AI 聊天助手</div>
-    <button class="chat-close" data-act="closeChat">关闭</button>
+    <div class="chat-head-act">
+      <button class="chat-act" data-act="memSearch">查找</button>
+      <button class="chat-act" data-act="memView">记忆</button>
+      <button class="chat-act" data-act="closeChat">关闭</button>
+    </div>
+  </div>
+  <div class="chat-search hidden" id="chatSearch">
+    <input class="chat-search-input" id="chatSearchInput" placeholder="搜历史：关键词、人名、金额…" />
+    <span class="chat-search-cnt" id="chatSearchCnt"></span>
+    <button class="chat-sbtn" data-act="memPrev">上一条</button>
+    <button class="chat-sbtn" data-act="memNext">下一条</button>
+    <button class="chat-sbtn" data-act="memCloseSearch">收起</button>
   </div>
   <div class="chat-box" id="chatBox"></div>
   <div class="chat-input-row">
