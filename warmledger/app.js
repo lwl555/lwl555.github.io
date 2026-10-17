@@ -846,6 +846,13 @@ function viewSettings(){
       '<div class="setting-row"><div>AI 语音朗读（本地语音）</div><div class="switch ' + (s.tts !== false ? 'on' : '') + '" data-act="toggle" data-id="tts"><i></i></div></div>' +
     '</div>' +
     '<div class="card">' +
+      '<h3 class="card-title">通知与提醒</h3>' +
+      '<div class="setting-row"><div>通知权限<br><span class="small muted">' + (window.__notifyOk ? '已开启，提醒能正常弹出' : '未开启，到点不会弹通知') + '</span></div>' +
+        '<button class="tb-action" data-act="' + (window.__notifyOk ? 'testNotify' : 'openNotifySettings') + '">' + (window.__notifyOk ? '测试通知' : '去开启') + '</button></div>' +
+      (window.__notifyOk ? '<div class="setting-row"><div>发一条测试通知<br><span class="small muted">立刻验证通知栏是否正常</span></div><button class="tb-action" data-act="testNotify">发送</button></div>' : '') +
+      '<p class="small muted" style="margin:8px 0 0">到点准时通知还需：系统设置里允许暖记「自启动 / 后台运行 / 不受电池限制」（小米/华为/OPPO/Vivo 等默认会限制）。</p>' +
+    '</div>' +
+    '<div class="card">' +
       '<h3 class="card-title">数据</h3>' +
       '<button class="btn ghost" data-act="export" style="margin-bottom:10px">导出账单（CSV）</button>' +
       '<button class="btn danger" data-act="clear">清空本地数据</button>' +
@@ -1856,7 +1863,11 @@ function toggleTodo(id){
   S.saveTodo(arr); render();
 }
 
-function delTodo(id){ S.saveTodo(S.todo().filter(x => x.id !== id)); render(); toast('已删除') }
+function delTodo(id){ S.saveTodo(S.todo().filter(x => x.id !== id));
+  if(window.Android && typeof window.Android.cancelReminder === 'function'){
+    try{ window.Android.cancelReminder('todo-' + id) }catch(e){}
+  }
+  render(); toast('已删除') }
 
 function clearDoneTodo(){
   const today = ymd(Date.now());
@@ -1917,6 +1928,9 @@ function saveSched(){
 }
 function delSched(el, id){
   S.saveSched(S.sched().filter(x => x.id !== id));
+  if(window.Android && typeof window.Android.cancelReminder === 'function'){
+    try{ window.Android.cancelReminder(id) }catch(e){}
+  }
   closeSheet(); render(); toast('已删除');
 }
 
@@ -1946,6 +1960,28 @@ function saveNoteRemind(){
     window.Android.scheduleReminder('便签提醒', txt, when, 'note-' + d);
     closeSheet(); toast('已设定 ' + d + ' ' + t + ' 提醒，到点通知栏见');
   } else { toast('当前环境不支持通知提醒') }
+}
+
+/* ================= 通知状态：权限检测 / 引导 / 测试 ================= */
+function refreshNotify(){
+  let ok = true;
+  try{
+    if(window.Android && typeof window.Android.notifyEnabled === 'function') ok = !!window.Android.notifyEnabled();
+  }catch(e){}
+  window.__notifyOk = ok;
+  const b = document.getElementById('notifyBanner');
+  if(b) b.classList.toggle('hidden', ok);
+  if(page === 'settings') render(); // 设置页显示实时权限状态
+}
+function openNotifySettings(){
+  if(window.Android && typeof window.Android.openNotifySettings === 'function'){
+    try{ window.Android.openNotifySettings() }catch(e){}
+  } else { toast('请在手机设置里允许暖记发通知') }
+}
+function testNotify(){
+  if(!window.Android || typeof window.Android.testNotify !== 'function'){ toast('当前环境不支持'); return }
+  try{ window.Android.testNotify() }catch(e){ toast('发送失败'); return }
+  toast('已发送测试通知，请看通知栏');
 }
 
 /* ================= 导出账单 ================= */
@@ -2271,6 +2307,8 @@ const ACTIONS = {
   },
   sync(){ syncAll(false) },
   diag(){ runDiag() },
+  testNotify(){ testNotify() },
+  openNotifySettings(){ openNotifySettings() },
   toggle(el, id){
     const s = S.set();
     if(id === 'auto') s.auto = !(s.auto !== false);
@@ -2435,6 +2473,9 @@ function init(){
   if((s.auto !== false)) syncAll(true);
   window.addEventListener('online', () => syncAll(true));
   setInterval(function(){ if((S.set().auto !== false)) syncAll(true) }, 120000);
+  // 通知权限状态：没开启就显示顶部引导条（从系统设置回来会再查一次）
+  refreshNotify();
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshNotify() });
 }
 init();
 
