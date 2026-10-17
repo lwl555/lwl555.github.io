@@ -42,6 +42,15 @@ input,select,textarea{font-family:inherit;font-size:15px;color:inherit}
 }
 .tb-action:active{opacity:.7}
 
+/* ---------- 通知未开启引导条 ---------- */
+.notify-banner{
+  position:sticky;top:0;z-index:29;
+  background:#FFF7E8;border-bottom:1px solid #F3E2B8;
+  color:#8A5A00;font-size:13px;text-align:center;
+  padding:9px 16px;
+}
+.notify-banner.hidden{display:none}
+
 /* ---------- 内容区 ---------- */
 .view{padding:14px 16px 24px;max-width:720px;margin:0 auto}
 
