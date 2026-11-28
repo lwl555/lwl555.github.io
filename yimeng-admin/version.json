@@ -1,6 +1,6 @@
 {
-  "version": "2.1.16",
-  "notes": "2.1.16 更新内容：\n· 修「发送失败」：建会话失败时报错自己崩了（BigInt），把真因盖住了；现在会打出 cmd 和返回字段\n· 发送时优先用页面拉会话列表时抄下来的 ticket，不用再建会话\n· 收消息已实测可用（日志会出现「帧内容字段: new_message_notify」）\n\n装新版前请先关闭正在运行的集梦Ai，直接覆盖安装，聊天记录不会丢。",
+  "version": "2.1.17",
+  "notes": "2.1.17 更新内容：\n· 修抖音发送被拒（INVALID_REQUEST）：请求外壳按 DouYin_Spider 源码重写\n  · body 补上缺失的 RequestBody 一层嵌套（之前少一层，服务端直接判非法）\n  · sdk_version / build_number / version_code / headers 全套对齐新版 PC IM\n  · token、ts_sign、sdk_cert 改为留空（新版改由 HTTP 头认证）\n· 收消息保持可用\n\n装新版前请先关闭正在运行的集梦Ai，直接覆盖安装，聊天记录不会丢。",
   "mandatory": false,
   "url": ""
 }
