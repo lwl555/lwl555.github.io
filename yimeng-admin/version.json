@@ -1,6 +1,6 @@
 {
-  "version": "2.1.18",
-  "notes": "2.1.18 更新内容：\n· 修抖音建会话被拒（INVALID_REQUEST）的两个真因：\n  1. 签名内容要包成 {\"sign_data\":...,\"certType\":\"cookie\",\"scene\":\"web_protect\"} 再签，不是签裸字符串\n  2. 签名要 DER 编码，之前发的是 64 字节裸签名（base64 88 字符，正确应为 96 字符）\n· 发送接口去掉多余签名（上游明确 cmd 100 不需要顶层签名）\n· 收消息保持可用\n\n装新版前请先关闭正在运行的集梦Ai，直接覆盖安装，聊天记录不会丢。",
+  "version": "2.1.19",
+  "notes": "2.1.19 更新内容：\n· 找到抖音发送失败的真因：抖音下发的签名私钥是 PEM 格式（-----BEGIN PRIVATE KEY-----），程序一直按十六进制解析，导入失败后签名变成空字符串，服务端只能回 INVALID_REQUEST\n· 现在同时支持 PEM 和 hex 两种私钥格式（对齐上游 DouYin_Spider 的 _load_signing_key）\n· 收消息保持可用\n\n装新版前请先关闭正在运行的集梦Ai，直接覆盖安装，聊天记录不会丢。",
   "mandatory": false,
   "url": ""
 }
